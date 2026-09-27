@@ -1,15 +1,28 @@
 // Jot — a floating scratchpad for thoughts/questions while reviewing AI output.
 //
-// Gestures (global, Copper-style double taps):
-//   ⇧⇧  capture the current selection straight into the widget
-//   ⌘⌘  jot in the widget — annotates the capture you just made, else a new note
-// Paste / Copy live in the widget footer and the menu-bar menu. Paste types into
-// whatever app you were in, at its cursor, because the widget never takes focus
-// from it.
+// Global gestures (Copper-style double taps of a lone modifier):
+//   ⇧⇧  capture the current selection into the widget
+//   ⌘⌘  jot in the widget (annotates the capture you just made, else a new note); again to leave
+//   ⌥⌥  paste checked items (or all) at your cursor
+// In the widget: ↩ save (cursor stays for the next note), esc back to your app,
+//   ⌘↩ paste, ⌘⇧C copy, ⌘⇧⌫ clear, ⌘⇧A select all/none.
+// The widget never activates Jot, so "paste" lands at the cursor of the app you were in.
 
 import AppKit
 import ServiceManagement
 import SwiftUI
+
+func log(_ message: String) {
+    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Jot.log")
+    let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile()
+        h.write(line.data(using: .utf8)!)
+        try? h.close()
+    } else {
+        try? line.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
 
 // MARK: - Model
 
@@ -31,6 +44,9 @@ final class Store: ObservableObject {
     @Published var draft = ""
     @Published var focusRequest = 0
     @Published var flashID: UUID?
+    @Published var trusted = Keys.trusted
+    /// Items as they were before the last bulk removal, offered as a short-lived undo.
+    @Published var undo: [Item]?
 
     var onCountChange: ((Int) -> Void)?
     private var lastCapture: (id: UUID, at: Date)?
@@ -115,8 +131,29 @@ final class Store: ObservableObject {
         if let e = editing, ids.contains(e) { cancelDraft() }
     }
 
+    /// Removes several items at once, keeping an undo for a few seconds.
+    func removeBulk(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let before = items
+        remove(ids)
+        undo = before
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            if self?.undo == before { self?.undo = nil }
+        }
+    }
+
+    func undoRemove() {
+        guard let before = undo else { return }
+        items = before
+        undo = nil
+    }
+
     func toggle(_ id: UUID) {
         if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+
+    func toggleAll() {
+        selected = selected.count == items.count ? [] : Set(items.map(\.id))
     }
 
     static func render(_ items: [Item]) -> String {
@@ -142,8 +179,28 @@ enum Keys {
         _ = AXIsProcessTrustedWithOptions(opts)
     }
 
+    static func openAccessibilitySettings() {
+        promptForAccess()
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
+
+    /// Reads the selection via Accessibility without touching the clipboard. Works in native
+    /// text views; many terminals/Electron apps don't expose it, hence the ⌘C fallback.
+    static func axSelectedText() -> String? {
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(),
+                                            kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element as! AXUIElement,
+                                            kAXSelectedTextAttribute as CFString, &value) == .success,
+              let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
     static func sendCommand(_ key: CGKeyCode) {
-        let src = CGEventSource(stateID: .privateState)
+        let src = CGEventSource(stateID: .combinedSessionState)
         for down in [true, false] {
             let e = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: down)
             e?.flags = .maskCommand
@@ -171,8 +228,12 @@ enum Keys {
         if !items.isEmpty { pb.writeObjects(items) }
     }
 
-    /// Sends ⌘C to the frontmost app, reads what it copied, then puts the old clipboard back.
+    /// Accessibility first; otherwise sends ⌘C, reads what was copied, and restores the old clipboard.
     static func copySelection(_ completion: @escaping (String?) -> Void) {
+        if let text = axSelectedText() {
+            log("capture: via accessibility (\(text.count) chars)")
+            return completion(text)
+        }
         let pb = NSPasteboard.general
         let snap = snapshot(pb)
         let start = pb.changeCount
@@ -182,8 +243,10 @@ enum Keys {
             if pb.changeCount != start {
                 let text = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 restore(pb, snap)
+                log("capture: via ⌘C (\(text?.count ?? 0) chars)")
                 completion(text?.isEmpty == false ? text : nil)
             } else if tries >= 25 {
+                log("capture: ⌘C copied nothing (no selection?)")
                 completion(nil)
             } else {
                 tries += 1
@@ -202,7 +265,7 @@ enum Keys {
 
 /// Detects a lone modifier tapped twice (press+release with nothing else in between).
 final class DoubleTap {
-    enum Mod { case shift, command }
+    enum Mod { case shift, command, option }
 
     private let onTap: (Mod) -> Void
     private var monitors: [Any] = []
@@ -229,13 +292,17 @@ final class DoubleTap {
         }
         let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
             .subtracting([.capsLock, .function, .numericPad])
-        if flags == .shift { down = (.shift, now) }
-        else if flags == .command { down = (.command, now) }
-        else if flags.isEmpty, let d = down {
+        let mods: [UInt: Mod] = [NSEvent.ModifierFlags.shift.rawValue: .shift,
+                                 NSEvent.ModifierFlags.command.rawValue: .command,
+                                 NSEvent.ModifierFlags.option.rawValue: .option]
+        if let mod = mods[flags.rawValue] {
+            down = (mod, now)
+        } else if flags.isEmpty, let d = down {
             down = nil
             guard now - d.at < 0.3 else { lastTap = nil; return }
             if let l = lastTap, l.mod == d.mod, now - l.at < 0.4 {
                 lastTap = nil
+                log("double-tap: \(d.mod)")
                 onTap(d.mod)
             } else {
                 lastTap = (d.mod, now)
@@ -318,14 +385,23 @@ struct WidgetView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !store.trusted { permissionBanner }
             list
             Divider()
             composer
             Divider()
             footer
         }
-        .frame(minWidth: 280, minHeight: 200)
+        .frame(minWidth: 300, minHeight: 200)
         .onChange(of: store.focusRequest) { composerFocused = true }
+    }
+
+    private var permissionBanner: some View {
+        Button(action: Keys.openAccessibilitySettings) {
+            Label("Allow Accessibility so ⇧⇧ and Paste work →", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8).background(Color.yellow.opacity(0.25))
+        }.buttonStyle(.plain)
     }
 
     @ViewBuilder private var list: some View {
@@ -334,8 +410,8 @@ struct WidgetView: View {
                 Text("Nothing jotted yet").font(.headline)
                 Group {
                     Text("⇧⇧  capture selection")
-                    Text("⌘⌘  note (annotates last capture)")
-                    Text("Paste drops it at your cursor")
+                    Text("⌘⌘  note / annotate capture")
+                    Text("⌥⌥  paste at your cursor")
                 }.font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
@@ -376,29 +452,41 @@ struct WidgetView: View {
                       text: $store.draft, axis: .vertical)
                 .textFieldStyle(.plain).lineLimit(1...6)
                 .focused($composerFocused)
-                .onSubmit { store.commitDraft(); done() }
+                .onSubmit {
+                    store.commitDraft()
+                    composerFocused = true
+                }
                 .onExitCommand { store.cancelDraft(); done() }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             let all = !store.items.isEmpty && store.selected.count == store.items.count
-            Button(all ? "None" : "All") {
-                store.selected = all ? [] : Set(store.items.map(\.id))
+            Button(all ? "None" : "All", action: store.toggleAll)
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+            if store.undo != nil {
+                Button("Undo") { store.undoRemove() }
+            } else {
+                Text(status ?? (store.selected.isEmpty ? "\(store.items.count)"
+                                                       : "\(store.selected.count)/\(store.items.count)"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Text(status ?? (store.selected.isEmpty ? "\(store.items.count) items"
-                                                   : "\(store.selected.count) of \(store.items.count)"))
-                .font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Toggle("Clear", isOn: $clearAfter).toggleStyle(.checkbox).font(.caption)
-                .help("Remove items from Jot after copying or pasting")
+            Button { store.removeBulk(Set(store.targets.map(\.id))) } label: { Image(systemName: "trash") }
+                .keyboardShortcut(.delete, modifiers: [.command, .shift])
+                .help(store.selected.isEmpty ? "Clear all (⌘⇧⌫)" : "Clear checked (⌘⇧⌫)")
+            Toggle("Clear after", isOn: $clearAfter).toggleStyle(.checkbox).font(.caption)
+                .help("Remove items once copied or pasted")
             Button("Copy") { copy(); flash("Copied ✓") }
-            Button("Paste") { paste() }.buttonStyle(.borderedProminent)
-                .help("Paste at the cursor in the app you were just in")
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .help("Copy to clipboard (⌘⇧C)")
+            Button("Paste", action: paste).buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("Paste at your cursor (⌥⌥ anywhere, ⌘↩ here)")
         }
-        .controlSize(.small).padding(8).disabled(store.items.isEmpty)
+        .controlSize(.small).padding(8).disabled(store.items.isEmpty && store.undo == nil)
     }
 
     private func flash(_ text: String) {
@@ -418,26 +506,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch mod {
         case .shift: self?.captureSelection()
         case .command: self?.beginNote()
+        case .option: self?.pasteItems()
         }
     }
     /// True while the widget is open only because ⌘⌘ summoned it from the menu bar.
     private var summoned = false
-    private var trustTimer: Timer?
 
     private var clearAfter: Bool { UserDefaults.standard.object(forKey: "clearAfter") as? Bool ?? true }
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        log("launch: trusted=\(Keys.trusted)")
         buildWidget()
         buildStatusItem()
         taps.install()
-        if !Keys.trusted {
-            Keys.promptForAccess()
-            // Event monitors installed before access is granted stay deaf; reinstall once it is.
-            trustTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] t in
-                guard Keys.trusted else { return }
-                t.invalidate()
-                self?.taps.install()
-            }
+        if !Keys.trusted { Keys.promptForAccess() }
+        // Access gets revoked on every rebuild (ad-hoc signature); watch it so the banner
+        // stays honest, and reinstall monitors when granted since they go deaf without it.
+        Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            guard let self, self.store.trusted != Keys.trusted else { return }
+            self.store.trusted = Keys.trusted
+            log("trust changed: \(Keys.trusted)")
+            if Keys.trusted { self.taps.install() }
         }
         if UserDefaults.standard.object(forKey: "widgetVisible") as? Bool ?? true {
             widget.orderFrontRegardless()
@@ -447,7 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: Widget
 
     private func buildWidget() {
-        let panel = WidgetPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 440),
+        let panel = WidgetPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 440),
                                 styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
                                 backing: .buffered, defer: false)
         panel.title = "Jot"
@@ -463,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             copy: { [weak self] in self?.copyItems() },
             paste: { [weak self] in self?.pasteItems() }))
         if !panel.setFrameUsingName("JotWidget"), let screen = NSScreen.main?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(x: screen.maxX - 360, y: screen.maxY - 460))
+            panel.setFrameOrigin(NSPoint(x: screen.maxX - 380, y: screen.maxY - 460))
         }
         panel.setFrameAutosaveName("JotWidget")
         widget = panel
@@ -503,8 +592,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu = NSMenu()
         menu.addItem(withTitle: "Show / Hide Widget", action: #selector(toggleWidget), keyEquivalent: "")
-        menu.addItem(withTitle: "Paste at Cursor", action: #selector(pasteFromMenu), keyEquivalent: "")
+        menu.addItem(withTitle: "Paste at Cursor  (⌥⌥)", action: #selector(pasteFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Copy", action: #selector(copyFromMenu), keyEquivalent: "")
+        menu.addItem(withTitle: "Clear", action: #selector(clearFromMenu), keyEquivalent: "")
         menu.addItem(.separator())
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -547,15 +637,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sender.state = svc.status == .enabled ? .on : .off
     }
 
-    @objc func openAccessibility() {
-        Keys.promptForAccess()
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-    }
+    @objc func openAccessibility() { Keys.openAccessibilitySettings() }
 
     // MARK: Actions
 
     private func captureSelection() {
         guard !widget.isKeyWindow else { return }
+        guard Keys.trusted else {
+            log("capture: blocked, Accessibility not granted")
+            pulseStatus("exclamationmark.triangle")
+            return Keys.openAccessibilitySettings()
+        }
         let source = NSWorkspace.shared.frontmostApplication?.localizedName
         Keys.copySelection { [weak self] text in
             guard let self else { return }
@@ -579,7 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let items = store.targets
         guard !items.isEmpty else { return NSSound.beep() }
         Keys.setClipboard(Store.render(items))
-        if clearAfter { store.remove(Set(items.map(\.id))) }
+        if clearAfter { store.removeBulk(Set(items.map(\.id))) }
     }
 
     private func pasteItems() {
@@ -587,15 +679,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !items.isEmpty else { return NSSound.beep() }
         Keys.setClipboard(Store.render(items))
         // Without Accessibility we can't send ⌘V; leave it on the clipboard and keep the items.
-        guard Keys.trusted else { return Keys.promptForAccess() }
+        guard Keys.trusted else { return Keys.openAccessibilitySettings() }
         releaseFocus()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             Keys.sendCommand(9) // kVK_ANSI_V
-            if self.clearAfter { self.store.remove(Set(items.map(\.id))) }
+            log("paste: \(items.count) items")
+            if self.clearAfter { self.store.removeBulk(Set(items.map(\.id))) }
         }
     }
 
     @objc private func copyFromMenu() { copyItems() }
+
+    @objc private func clearFromMenu() { store.removeBulk(Set(store.targets.map(\.id))) }
 
     @objc private func pasteFromMenu() {
         // Let the menu finish closing so ⌘V lands in the app underneath.
