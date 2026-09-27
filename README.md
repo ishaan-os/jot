@@ -66,7 +66,8 @@ Right-click the menu-bar icon → **Launch at Login** to keep it around.
 ## Media
 
 Everything under `assets/` is rendered from a scripted SwiftUI mock (`promo/Promo.swift`) — no screen
-recording. `promo/render.sh` regenerates `hero.png`, `widget.png`, `demo.gif` and `demo.mp4`.
+recording. `promo/render.sh` regenerates `hero.png`, `widget.png`, `demo.gif` and `demo.mp4`
+(or `promo/bin/promo assets frames <dir>` dumps a 30fps PNG sequence for ffmpeg).
 The icon is `promo/icon.svg`.
 
 ## Credits

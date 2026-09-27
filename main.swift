@@ -6,7 +6,7 @@
 //   ⌃⌃  paste checked items (or all) at your cursor
 // In the widget: ↩ save (cursor stays for the next note), esc back to your app,
 //   ⌘↩ paste, ⌘⇧C copy, ⌘⇧⌫ clear, ⌘⇧A select all/none.
-// The widget never activates Jot, so "paste" lands at the cursor of the app you were in.
+// Paste hands focus back to the app you were in first, so it lands at that app's cursor.
 
 import AppKit
 import ServiceManagement
@@ -322,6 +322,20 @@ final class DoubleTap {
 
 final class WidgetPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    /// Jot has no Edit menu, so ⌘V/⌘C/⌘X/⌘A/⌘Z would never reach the text field. Dictation
+    /// tools like Wispr Flow insert text by posting ⌘V, so route these by hand.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let editing: [String: Selector] = ["v": #selector(NSText.paste(_:)), "c": #selector(NSText.copy(_:)),
+                                           "x": #selector(NSText.cut(_:)), "a": #selector(NSText.selectAll(_:)),
+                                           "z": Selector(("undo:"))]
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           let key = event.charactersIgnoringModifiers, let action = editing[key],
+           NSApp.sendAction(action, to: nil, from: self) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 struct RowView: View {
@@ -516,6 +530,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     /// True while the widget is open only because ⌘⌘ summoned it from the menu bar.
     private var summoned = false
+    /// The app to reactivate when you leave the composer.
+    private var returnTo: NSRunningApplication?
 
     private var clearAfter: Bool { UserDefaults.standard.object(forKey: "clearAfter") as? Bool ?? true }
 
@@ -579,10 +595,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Hands the keyboard back to the app you were in (the panel never activated Jot,
     /// so ordering it out returns key focus without switching apps).
+    /// Typing in the widget activates Jot (dictation tools only insert into the frontmost app's
+    /// focused field); remember who was frontmost so we can hand focus back.
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard !NSApp.isActive else { return }
+        let front = NSWorkspace.shared.frontmostApplication
+        returnTo = front?.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : front
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationDidResignActive(_ notification: Notification) { returnTo = nil }
+
+    /// Hands the keyboard back to the app you were in.
     private func releaseFocus() {
         guard widget.isKeyWindow else { return }
         widget.orderOut(nil)
         if summoned { summoned = false } else { widget.orderFrontRegardless() }
+        if let app = returnTo {
+            returnTo = nil
+            NSApp.yieldActivation(to: app)
+            app.activate()
+        }
     }
 
     // MARK: Status item
@@ -688,8 +721,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Keys.setClipboard(Store.render(items))
         // Without Accessibility we can't send ⌘V; leave it on the clipboard and keep the items.
         guard Keys.trusted else { return Keys.openAccessibilitySettings() }
+        let wasTyping = widget.isKeyWindow
         releaseFocus()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+        // Give the app we hand focus back to a moment to become active before ⌘V.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasTyping ? 0.3 : 0.08)) {
             Keys.sendCommand(9) // kVK_ANSI_V
             log("paste: \(items.count) items")
             if self.clearAfter { self.store.removeBulk(Set(items.map(\.id))) }

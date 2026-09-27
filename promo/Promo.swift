@@ -532,5 +532,14 @@ MainActor.assumeIsolated {
         }
     }
     if only == "all" || only == "gif" { writeGIF(out.appendingPathComponent("demo.gif"), icon: icon, fps: 12, scale: 1) }
+    // PNG sequence for encoding elsewhere (e.g. ffmpeg) when AVFoundation's H.264 encoder isn't available.
+    if only == "frames" {
+        let dir = URL(fileURLWithPath: CommandLine.arguments[3])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for i in 0..<Int(duration * 30) {
+            writePNG(image(Scene(s: state(at: Double(i) / 30), icon: icon), scale: 1.5),
+                     dir.appendingPathComponent(String(format: "%04d.png", i)))
+        }
+    }
     if only == "all" || only == "mp4" { do { try writeMP4(out.appendingPathComponent("demo.mp4"), icon: icon, fps: 30, scale: 1.5) } catch { print("mp4 failed:", error) } }
 }
