@@ -3,7 +3,7 @@
 // Global gestures (Copper-style double taps of a lone modifier):
 //   ⇧⇧  capture the current selection into the widget
 //   ⌘⌘  jot in the widget (annotates the capture you just made, else a new note); again to leave
-//   ⌥⌥  paste checked items (or all) at your cursor
+//   ⌃⌃  paste checked items (or all) at your cursor
 // In the widget: ↩ save (cursor stays for the next note), esc back to your app,
 //   ⌘↩ paste, ⌘⇧C copy, ⌘⇧⌫ clear, ⌘⇧A select all/none.
 // The widget never activates Jot, so "paste" lands at the cursor of the app you were in.
@@ -265,7 +265,7 @@ enum Keys {
 
 /// Detects a lone modifier tapped twice (press+release with nothing else in between).
 final class DoubleTap {
-    enum Mod { case shift, command, option }
+    enum Mod { case shift, command, control }
 
     private let onTap: (Mod) -> Void
     private var monitors: [Any] = []
@@ -294,7 +294,7 @@ final class DoubleTap {
             .subtracting([.capsLock, .function, .numericPad])
         let mods: [UInt: Mod] = [NSEvent.ModifierFlags.shift.rawValue: .shift,
                                  NSEvent.ModifierFlags.command.rawValue: .command,
-                                 NSEvent.ModifierFlags.option.rawValue: .option]
+                                 NSEvent.ModifierFlags.control.rawValue: .control]
         if let mod = mods[flags.rawValue] {
             down = (mod, now)
         } else if flags.isEmpty, let d = down {
@@ -411,7 +411,7 @@ struct WidgetView: View {
                 Group {
                     Text("⇧⇧  capture selection")
                     Text("⌘⌘  note / annotate capture")
-                    Text("⌥⌥  paste at your cursor")
+                    Text("⌃⌃  paste at your cursor")
                 }.font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
@@ -484,7 +484,7 @@ struct WidgetView: View {
                 .help("Copy to clipboard (⌘⇧C)")
             Button("Paste", action: paste).buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: .command)
-                .help("Paste at your cursor (⌥⌥ anywhere, ⌘↩ here)")
+                .help("Paste at your cursor (⌃⌃ anywhere, ⌘↩ here)")
         }
         .controlSize(.small).padding(8).disabled(store.items.isEmpty && store.undo == nil)
     }
@@ -506,7 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch mod {
         case .shift: self?.captureSelection()
         case .command: self?.beginNote()
-        case .option: self?.pasteItems()
+        case .control: self?.pasteItems()
         }
     }
     /// True while the widget is open only because ⌘⌘ summoned it from the menu bar.
@@ -592,7 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu = NSMenu()
         menu.addItem(withTitle: "Show / Hide Widget", action: #selector(toggleWidget), keyEquivalent: "")
-        menu.addItem(withTitle: "Paste at Cursor  (⌥⌥)", action: #selector(pasteFromMenu), keyEquivalent: "")
+        menu.addItem(withTitle: "Paste at Cursor  (⌃⌃)", action: #selector(pasteFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Copy", action: #selector(copyFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Clear", action: #selector(clearFromMenu), keyEquivalent: "")
         menu.addItem(.separator())
