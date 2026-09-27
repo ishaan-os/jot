@@ -1,13 +1,13 @@
 // Jot — a floating scratchpad for thoughts/questions while reviewing AI output.
 //
-// Hotkeys (global):
-//   ⌃⌥C  capture current selection (+ optional note)
-//   ⌃⌥N  add a note only
-//   ⌃⌥V  paste checked items (or all) at the cursor, then clear them
-//   ⌃⌥J  show / hide the widget
+// Gestures (global, Copper-style double taps):
+//   ⇧⇧  capture the current selection straight into the widget
+//   ⌘⌘  jot in the widget — annotates the capture you just made, else a new note
+// Paste / Copy live in the widget footer and the menu-bar menu. Paste types into
+// whatever app you were in, at its cursor, because the widget never takes focus
+// from it.
 
 import AppKit
-import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
 
@@ -22,8 +22,18 @@ struct Item: Codable, Identifiable, Equatable {
 }
 
 final class Store: ObservableObject {
-    @Published var items: [Item] = [] { didSet { save() } }
+    @Published var items: [Item] = [] {
+        didSet { save(); onCountChange?(items.count) }
+    }
     @Published var selected: Set<UUID> = []
+    /// Composer state: `editing` is the item the draft annotates (nil = new note).
+    @Published var editing: UUID?
+    @Published var draft = ""
+    @Published var focusRequest = 0
+    @Published var flashID: UUID?
+
+    var onCountChange: ((Int) -> Void)?
+    private var lastCapture: (id: UUID, at: Date)?
 
     private let url: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -43,8 +53,55 @@ final class Store: ObservableObject {
         if let data = try? JSONEncoder().encode(items) { try? data.write(to: url, options: .atomic) }
     }
 
-    func add(quote: String?, note: String, app: String?) {
-        items.append(Item(quote: quote, note: note, app: app))
+    func capture(_ quote: String, app: String?) {
+        let item = Item(quote: quote, note: "", app: app)
+        items.append(item)
+        lastCapture = (item.id, Date())
+        flash(item.id)
+    }
+
+    func flash(_ id: UUID) {
+        flashID = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            if self?.flashID == id { self?.flashID = nil }
+        }
+    }
+
+    /// ⌘⌘: annotate a capture made in the last two minutes that has no note yet, else start a new note.
+    func beginNote() {
+        if let last = lastCapture, Date().timeIntervalSince(last.at) < 120,
+           let item = items.first(where: { $0.id == last.id }), item.note.isEmpty {
+            edit(item)
+        } else {
+            editing = nil
+            draft = ""
+        }
+        focusRequest += 1
+    }
+
+    func edit(_ item: Item) {
+        editing = item.id
+        draft = item.note
+        focusRequest += 1
+    }
+
+    func commitDraft() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = editing, let i = items.firstIndex(where: { $0.id == id }) {
+            items[i].note = text
+            flash(id)
+        } else if !text.isEmpty {
+            let item = Item(quote: nil, note: text, app: nil)
+            items.append(item)
+            flash(item.id)
+        }
+        cancelDraft()
+    }
+
+    func cancelDraft() {
+        editing = nil
+        draft = ""
+        lastCapture = nil
     }
 
     /// Checked items if any are checked, otherwise everything.
@@ -55,6 +112,7 @@ final class Store: ObservableObject {
     func remove(_ ids: Set<UUID>) {
         items.removeAll { ids.contains($0.id) }
         selected.subtract(ids)
+        if let e = editing, ids.contains(e) { cancelDraft() }
     }
 
     func toggle(_ id: UUID) {
@@ -84,23 +142,10 @@ enum Keys {
         _ = AXIsProcessTrustedWithOptions(opts)
     }
 
-    /// The hotkey's ⌃⌥ are usually still held when it fires; wait for release so they
-    /// don't mix into the synthetic ⌘C / ⌘V.
-    static func afterModifiersReleased(_ then: @escaping () -> Void) {
-        let deadline = Date().addingTimeInterval(0.6)
-        func check() {
-            let held = CGEventSource.flagsState(.hidSystemState)
-                .intersection([.maskControl, .maskAlternate, .maskShift, .maskCommand])
-            if held.isEmpty || Date() > deadline { then() }
-            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.015, execute: check) }
-        }
-        check()
-    }
-
-    static func sendCommand(_ key: Int) {
+    static func sendCommand(_ key: CGKeyCode) {
         let src = CGEventSource(stateID: .privateState)
         for down in [true, false] {
-            let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(key), keyDown: down)
+            let e = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: down)
             e?.flags = .maskCommand
             e?.post(tap: .cghidEventTap)
         }
@@ -131,7 +176,7 @@ enum Keys {
         let pb = NSPasteboard.general
         let snap = snapshot(pb)
         let start = pb.changeCount
-        sendCommand(kVK_ANSI_C)
+        sendCommand(8) // kVK_ANSI_C
         var tries = 0
         func poll() {
             if pb.changeCount != start {
@@ -155,97 +200,75 @@ enum Keys {
     }
 }
 
-enum HotKeys {
-    private static var handlers: [UInt32: () -> Void] = [:]
-    private static var refs: [EventHotKeyRef?] = []
+/// Detects a lone modifier tapped twice (press+release with nothing else in between).
+final class DoubleTap {
+    enum Mod { case shift, command }
 
-    static func install() {
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
-            var hk = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                              nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
-            DispatchQueue.main.async { HotKeys.handlers[hk.id]?() }
-            return noErr
-        }, 1, &spec, nil, nil)
+    private let onTap: (Mod) -> Void
+    private var monitors: [Any] = []
+    private var down: (mod: Mod, at: TimeInterval)?
+    private var lastTap: (mod: Mod, at: TimeInterval)?
+
+    init(onTap: @escaping (Mod) -> Void) { self.onTap = onTap }
+
+    func install() {
+        monitors.forEach(NSEvent.removeMonitor)
+        let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown]
+        monitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] in self?.handle($0) },
+            NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] in self?.handle($0); return $0 },
+        ].compactMap { $0 }
     }
 
-    static func register(_ key: Int, _ handler: @escaping () -> Void) {
-        let id = UInt32(handlers.count + 1)
-        handlers[id] = handler
-        var ref: EventHotKeyRef?
-        RegisterEventHotKey(UInt32(key), UInt32(controlKey | optionKey),
-                            EventHotKeyID(signature: OSType(0x4A4F_5421), id: id),
-                            GetApplicationEventTarget(), 0, &ref)
-        refs.append(ref)
-    }
-}
-
-// MARK: - Note popup
-
-final class KeyPanel: NSPanel {
-    var onCancel: (() -> Void)?
-    override var canBecomeKey: Bool { true }
-    override func cancelOperation(_ sender: Any?) { onCancel?() }
-}
-
-struct NoteView: View {
-    @State var quote: String?
-    let app: String?
-    let onSave: (String?, String) -> Void
-    let onCancel: () -> Void
-    @State private var note = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let q = quote {
-                HStack(alignment: .top, spacing: 8) {
-                    Rectangle().fill(Color.accentColor).frame(width: 3)
-                    Text(q).font(.callout).foregroundStyle(.secondary).lineLimit(5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button { quote = nil } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.tertiary).help("Drop the selection, keep note only")
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            TextField(quote == nil ? "Note…" : "Add a note (optional)…", text: $note, axis: .vertical)
-                .textFieldStyle(.plain).font(.title3).lineLimit(1...8)
-                .focused($focused)
-                .onSubmit(submit)
-            HStack {
-                Text(app.map { "from \($0)" } ?? "").lineLimit(1)
-                Spacer()
-                Text("↩ save   esc cancel")
-            }
-            .font(.caption).foregroundStyle(.tertiary)
+    private func handle(_ e: NSEvent) {
+        let now = e.timestamp
+        guard e.type == .flagsChanged else {
+            down = nil
+            lastTap = nil
+            return
         }
-        .padding(16)
-        .frame(width: 480)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .onExitCommand(perform: onCancel)
-        .onAppear { DispatchQueue.main.async { focused = true } }
-    }
-
-    private func submit() {
-        let n = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        if quote == nil && n.isEmpty { onCancel() } else { onSave(quote, n) }
+        let flags = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .function, .numericPad])
+        if flags == .shift { down = (.shift, now) }
+        else if flags == .command { down = (.command, now) }
+        else if flags.isEmpty, let d = down {
+            down = nil
+            guard now - d.at < 0.3 else { lastTap = nil; return }
+            if let l = lastTap, l.mod == d.mod, now - l.at < 0.4 {
+                lastTap = nil
+                onTap(d.mod)
+            } else {
+                lastTap = (d.mod, now)
+            }
+        } else {
+            down = nil
+            lastTap = nil
+        }
     }
 }
 
 // MARK: - Widget
 
+final class WidgetPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 struct RowView: View {
     let item: Item
     let checked: Bool
+    let editing: Bool
+    let flashing: Bool
     let onToggle: () -> Void
+    let onEdit: () -> Void
     let onDelete: () -> Void
     @State private var hover = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(checked ? Color.accentColor : .secondary)
+            Button(action: onToggle) {
+                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(checked ? Color.accentColor : .secondary)
+            }.buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 4) {
                 if let q = item.quote {
                     HStack(spacing: 6) {
@@ -259,14 +282,22 @@ struct RowView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onEdit)
+            .help("Click to add or edit a note")
             Button(action: onDelete) { Image(systemName: "xmark") }
                 .buttonStyle(.plain).foregroundStyle(.secondary).opacity(hover ? 1 : 0)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(checked ? Color.accentColor.opacity(0.08) : .clear)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onToggle)
+        .background(background)
+        .animation(.easeOut(duration: 0.4), value: flashing)
         .onHover { hover = $0 }
+    }
+
+    private var background: Color {
+        if flashing { return Color.accentColor.opacity(0.22) }
+        if editing { return Color.accentColor.opacity(0.12) }
+        return checked ? Color.accentColor.opacity(0.06) : .clear
     }
 
     static let ago: RelativeDateTimeFormatter = {
@@ -278,105 +309,202 @@ struct RowView: View {
 
 struct WidgetView: View {
     @ObservedObject var store: Store
-    let copy: (_ clear: Bool) -> Void
-    @State private var flash: String?
+    let done: () -> Void
+    let copy: () -> Void
+    let paste: () -> Void
+    @AppStorage("clearAfter") private var clearAfter = true
+    @FocusState private var composerFocused: Bool
+    @State private var status: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.items.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Nothing jotted yet").font(.headline)
-                    Group {
-                        Text("⌃⌥C  capture selection + note")
-                        Text("⌃⌥N  note only")
-                        Text("⌃⌥V  paste at cursor & clear")
-                        Text("⌃⌥J  show / hide this")
-                    }.font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
-            } else {
+            list
+            Divider()
+            composer
+            Divider()
+            footer
+        }
+        .frame(minWidth: 280, minHeight: 200)
+        .onChange(of: store.focusRequest) { composerFocused = true }
+    }
+
+    @ViewBuilder private var list: some View {
+        if store.items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Nothing jotted yet").font(.headline)
+                Group {
+                    Text("⇧⇧  capture selection")
+                    Text("⌘⌘  note (annotates last capture)")
+                    Text("Paste drops it at your cursor")
+                }.font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
+        } else {
+            ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(store.items) { item in
                             RowView(item: item, checked: store.selected.contains(item.id),
+                                    editing: store.editing == item.id, flashing: store.flashID == item.id,
                                     onToggle: { store.toggle(item.id) },
+                                    onEdit: { store.edit(item) },
                                     onDelete: { store.remove([item.id]) })
+                                .id(item.id)
                             Divider()
                         }
                     }
                 }
+                .onChange(of: store.flashID) { _, id in
+                    if let id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } }
+                }
             }
-            Divider()
-            HStack(spacing: 8) {
-                let all = !store.items.isEmpty && store.selected.count == store.items.count
-                Button(all ? "None" : "All") {
-                    store.selected = all ? [] : Set(store.items.map(\.id))
-                }.disabled(store.items.isEmpty)
-                Text(flash ?? (store.selected.isEmpty ? "\(store.items.count) items"
-                                                      : "\(store.selected.count) of \(store.items.count)"))
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Copy") { run(clear: false) }
-                Button("Copy & Clear") { run(clear: true) }.buttonStyle(.borderedProminent)
-            }
-            .controlSize(.small).padding(8).disabled(store.items.isEmpty)
         }
-        .frame(minWidth: 280, minHeight: 160)
     }
 
-    private func run(clear: Bool) {
-        copy(clear)
-        flash = "Copied ✓"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { flash = nil }
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let id = store.editing, let item = store.items.first(where: { $0.id == id }) {
+                HStack(spacing: 4) {
+                    Text("↳ note on: \(item.quote ?? item.note)").lineLimit(1)
+                    Spacer()
+                    Button { store.editing = nil; store.draft = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain)
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            TextField(store.editing == nil ? "Jot a thought…  (⌘⌘)" : "Add a note…",
+                      text: $store.draft, axis: .vertical)
+                .textFieldStyle(.plain).lineLimit(1...6)
+                .focused($composerFocused)
+                .onSubmit { store.commitDraft(); done() }
+                .onExitCommand { store.cancelDraft(); done() }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            let all = !store.items.isEmpty && store.selected.count == store.items.count
+            Button(all ? "None" : "All") {
+                store.selected = all ? [] : Set(store.items.map(\.id))
+            }
+            Text(status ?? (store.selected.isEmpty ? "\(store.items.count) items"
+                                                   : "\(store.selected.count) of \(store.items.count)"))
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Toggle("Clear", isOn: $clearAfter).toggleStyle(.checkbox).font(.caption)
+                .help("Remove items from Jot after copying or pasting")
+            Button("Copy") { copy(); flash("Copied ✓") }
+            Button("Paste") { paste() }.buttonStyle(.borderedProminent)
+                .help("Paste at the cursor in the app you were just in")
+        }
+        .controlSize(.small).padding(8).disabled(store.items.isEmpty)
+    }
+
+    private func flash(_ text: String) {
+        status = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { status = nil }
     }
 }
 
 // MARK: - App
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let store = Store()
-    var widget: NSPanel!
-    var popup: KeyPanel?
+    var widget: WidgetPanel!
     var statusItem: NSStatusItem!
+    var menu: NSMenu!
+    lazy var taps = DoubleTap { [weak self] mod in
+        switch mod {
+        case .shift: self?.captureSelection()
+        case .command: self?.beginNote()
+        }
+    }
+    /// True while the widget is open only because ⌘⌘ summoned it from the menu bar.
+    private var summoned = false
+    private var trustTimer: Timer?
+
+    private var clearAfter: Bool { UserDefaults.standard.object(forKey: "clearAfter") as? Bool ?? true }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         buildWidget()
-        buildMenu()
-        HotKeys.install()
-        HotKeys.register(kVK_ANSI_C) { [weak self] in self?.capture(withSelection: true) }
-        HotKeys.register(kVK_ANSI_N) { [weak self] in self?.capture(withSelection: false) }
-        HotKeys.register(kVK_ANSI_V) { [weak self] in self?.pasteAndClear() }
-        HotKeys.register(kVK_ANSI_J) { [weak self] in self?.toggleWidget() }
-        if !Keys.trusted { Keys.promptForAccess() }
-        widget.orderFrontRegardless()
+        buildStatusItem()
+        taps.install()
+        if !Keys.trusted {
+            Keys.promptForAccess()
+            // Event monitors installed before access is granted stay deaf; reinstall once it is.
+            trustTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] t in
+                guard Keys.trusted else { return }
+                t.invalidate()
+                self?.taps.install()
+            }
+        }
+        if UserDefaults.standard.object(forKey: "widgetVisible") as? Bool ?? true {
+            widget.orderFrontRegardless()
+        }
     }
 
+    // MARK: Widget
+
     private func buildWidget() {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 420),
-                            styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
-                            backing: .buffered, defer: false)
+        let panel = WidgetPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 440),
+                                styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+                                backing: .buffered, defer: false)
         panel.title = "Jot"
         panel.level = .floating
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: WidgetView(store: store) { [weak self] clear in
-            self?.copy(clear: clear)
-        })
+        panel.delegate = self
+        panel.contentView = NSHostingView(rootView: WidgetView(
+            store: store,
+            done: { [weak self] in self?.releaseFocus() },
+            copy: { [weak self] in self?.copyItems() },
+            paste: { [weak self] in self?.pasteItems() }))
         if !panel.setFrameUsingName("JotWidget"), let screen = NSScreen.main?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(x: screen.maxX - 360, y: screen.maxY - 440))
+            panel.setFrameOrigin(NSPoint(x: screen.maxX - 360, y: screen.maxY - 460))
         }
         panel.setFrameAutosaveName("JotWidget")
         widget = panel
     }
 
-    private func buildMenu() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    /// The close button tucks Jot into the menu bar instead of quitting.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        setWidgetVisible(false)
+        return false
+    }
+
+    private func setWidgetVisible(_ visible: Bool) {
+        summoned = false
+        if visible { widget.orderFrontRegardless() } else { widget.orderOut(nil) }
+        UserDefaults.standard.set(visible, forKey: "widgetVisible")
+    }
+
+    @objc func toggleWidget() { setWidgetVisible(!widget.isVisible) }
+
+    /// Hands the keyboard back to the app you were in (the panel never activated Jot,
+    /// so ordering it out returns key focus without switching apps).
+    private func releaseFocus() {
+        guard widget.isKeyWindow else { return }
+        widget.orderOut(nil)
+        if summoned { summoned = false } else { widget.orderFrontRegardless() }
+    }
+
+    // MARK: Status item
+
+    private func buildStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Jot")
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Show / Hide  (⌃⌥J)", action: #selector(toggleWidget), keyEquivalent: "")
-        menu.addItem(withTitle: "New Note  (⌃⌥N)", action: #selector(newNote), keyEquivalent: "")
+        statusItem.button?.imagePosition = .imageLeading
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+        menu = NSMenu()
+        menu.addItem(withTitle: "Show / Hide Widget", action: #selector(toggleWidget), keyEquivalent: "")
+        menu.addItem(withTitle: "Paste at Cursor", action: #selector(pasteFromMenu), keyEquivalent: "")
+        menu.addItem(withTitle: "Copy", action: #selector(copyFromMenu), keyEquivalent: "")
         menu.addItem(.separator())
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -385,14 +513,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Jot", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.items.forEach { if $0.action != #selector(NSApplication.terminate(_:)) { $0.target = self } }
-        statusItem.menu = menu
+
+        store.onCountChange = { [weak self] n in
+            self?.statusItem.button?.title = n > 0 ? "\(n)" : ""
+        }
+        store.onCountChange?(store.items.count)
     }
 
-    @objc func toggleWidget() {
-        if widget.isVisible { widget.orderOut(nil) } else { widget.orderFrontRegardless() }
+    /// Left click toggles the widget, right click opens the menu.
+    @objc private func statusClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            statusItem.menu = menu
+            statusItem.button?.performClick(nil)
+            statusItem.menu = nil
+        } else {
+            toggleWidget()
+        }
     }
 
-    @objc func newNote() { capture(withSelection: false) }
+    private func pulseStatus(_ symbol: String) {
+        let button = statusItem.button
+        button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Jot")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            button?.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Jot")
+        }
+    }
 
     @objc func toggleLogin(_ sender: NSMenuItem) {
         let svc = SMAppService.mainApp
@@ -407,76 +552,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
-    private func capture(withSelection: Bool) {
-        guard popup == nil else { return }
-        let source = NSWorkspace.shared.frontmostApplication
-        let appName = source?.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : source?.localizedName
-        guard withSelection else { return showPopup(quote: nil, app: appName, returnTo: source) }
-        guard Keys.trusted else {
-            Keys.promptForAccess()
-            return showPopup(quote: nil, app: appName, returnTo: source)
-        }
-        Keys.afterModifiersReleased {
-            Keys.copySelection { text in self.showPopup(quote: text, app: appName, returnTo: source) }
+    // MARK: Actions
+
+    private func captureSelection() {
+        guard !widget.isKeyWindow else { return }
+        let source = NSWorkspace.shared.frontmostApplication?.localizedName
+        Keys.copySelection { [weak self] text in
+            guard let self else { return }
+            guard let text else { return self.pulseStatus("minus.circle") }
+            self.store.capture(text, app: source)
+            self.pulseStatus("checkmark.circle.fill")
         }
     }
 
-    private func showPopup(quote: String?, app: String?, returnTo source: NSRunningApplication?) {
-        let panel = KeyPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
-                             backing: .buffered, defer: false)
-        panel.level = .modalPanel
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-
-        var closed = false
-        let close = { [weak self, weak panel] in
-            guard !closed else { return }
-            closed = true
-            panel?.orderOut(nil)
-            self?.popup = nil
-            if let source, source.bundleIdentifier != Bundle.main.bundleIdentifier {
-                NSApp.yieldActivation(to: source)
-                source.activate()
-            }
+    private func beginNote() {
+        if widget.isKeyWindow { return releaseFocus() }
+        if !widget.isVisible {
+            summoned = true
+            widget.orderFrontRegardless()
         }
-        panel.onCancel = close
-        let view = NoteView(quote: quote, app: app, onSave: { [weak self] q, n in
-            self?.store.add(quote: q, note: n, app: app)
-            close()
-        }, onCancel: close)
-        let host = NSHostingView(rootView: view)
-        panel.contentView = host
-        panel.setContentSize(host.fittingSize)
-
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main!
-        let f = screen.visibleFrame
-        panel.setFrameTopLeftPoint(NSPoint(x: f.midX - panel.frame.width / 2, y: f.maxY - f.height * 0.22))
-
-        popup = panel
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
+        store.beginNote()
+        widget.makeKey()
     }
 
-    private func copy(clear: Bool) {
+    private func copyItems() {
         let items = store.targets
         guard !items.isEmpty else { return NSSound.beep() }
         Keys.setClipboard(Store.render(items))
-        if clear { store.remove(Set(items.map(\.id))) }
+        if clearAfter { store.remove(Set(items.map(\.id))) }
     }
 
-    private func pasteAndClear() {
+    private func pasteItems() {
         let items = store.targets
         guard !items.isEmpty else { return NSSound.beep() }
         Keys.setClipboard(Store.render(items))
         // Without Accessibility we can't send ⌘V; leave it on the clipboard and keep the items.
         guard Keys.trusted else { return Keys.promptForAccess() }
-        Keys.afterModifiersReleased {
-            Keys.sendCommand(kVK_ANSI_V)
-            self.store.remove(Set(items.map(\.id)))
+        releaseFocus()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            Keys.sendCommand(9) // kVK_ANSI_V
+            if self.clearAfter { self.store.remove(Set(items.map(\.id))) }
         }
+    }
+
+    @objc private func copyFromMenu() { copyItems() }
+
+    @objc private func pasteFromMenu() {
+        // Let the menu finish closing so ⌘V lands in the app underneath.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.pasteItems() }
     }
 }
 
