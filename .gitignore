@@ -1,2 +1,4 @@
 build/
 .toolchain-fix/
+promo/bin/
+promo/frames/

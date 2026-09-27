@@ -1,7 +1,7 @@
 // Jot — a floating scratchpad for thoughts/questions while reviewing AI output.
 //
 // Global gestures (Copper-style double taps of a lone modifier):
-//   ⇧⇧  capture the current selection into the widget
+//   ⇧⇧  capture the current selection and jump into its note (↩ saves & returns, esc skips)
 //   ⌘⌘  jot in the widget (annotates the capture you just made, else a new note); again to leave
 //   ⌃⌃  paste checked items (or all) at your cursor
 // In the widget: ↩ save (cursor stays for the next note), esc back to your app,
@@ -43,6 +43,8 @@ final class Store: ObservableObject {
     @Published var editing: UUID?
     @Published var draft = ""
     @Published var focusRequest = 0
+    /// Set when ⇧⇧ opened the composer: saving the note returns you to your app.
+    var releaseOnSubmit = false
     @Published var flashID: UUID?
     @Published var trusted = Keys.trusted
     /// Items as they were before the last bulk removal, offered as a short-lived undo.
@@ -96,6 +98,7 @@ final class Store: ObservableObject {
     }
 
     func edit(_ item: Item) {
+        releaseOnSubmit = false
         editing = item.id
         draft = item.note
         focusRequest += 1
@@ -115,6 +118,7 @@ final class Store: ObservableObject {
     }
 
     func cancelDraft() {
+        releaseOnSubmit = false
         editing = nil
         draft = ""
         lastCapture = nil
@@ -453,8 +457,9 @@ struct WidgetView: View {
                 .textFieldStyle(.plain).lineLimit(1...6)
                 .focused($composerFocused)
                 .onSubmit {
+                    let release = store.releaseOnSubmit
                     store.commitDraft()
-                    composerFocused = true
+                    if release { done() } else { composerFocused = true }
                 }
                 .onExitCommand { store.cancelDraft(); done() }
         }
@@ -654,6 +659,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let text else { return self.pulseStatus("minus.circle") }
             self.store.capture(text, app: source)
             self.pulseStatus("checkmark.circle.fill")
+            // Straight into annotating it; ↩ saves and hands focus back, esc skips the note.
+            self.beginNote()
+            self.store.releaseOnSubmit = true
         }
     }
 
