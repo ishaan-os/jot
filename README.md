@@ -1,17 +1,22 @@
 <p align="center"><img src="assets/icon-1024.png" width="128" alt="Jot icon"></p>
 <h1 align="center">Jot</h1>
-<p align="center"><b>Collect thoughts & questions while you review AI output — then drop them all back in one keystroke.</b></p>
+<p align="center"><b>A scratchpad for reviewing AI output — in every agent, browser and editor.</b><br>
+Three gestures. No setup, no account, no sync.</p>
 
-<p align="center"><img src="assets/demo.gif" alt="Jot demo: capture a selection with ⇧⇧, annotate it, jot a thought with ⌘⌘, paste everything with ⌃⌃"></p>
+<p align="center"><img src="assets/demo.gif" alt="Jot demo: capture from a terminal agent, a browser chat and a code editor with ⇧⇧, jot a thought with ⌘⌘, paste it all back into the agent with ⌃⌃"></p>
 
-Reviewing a long AI answer, a diff, or a plan, you keep having reactions that aren't ready to send yet.
-Jot is a tiny floating scratchpad for exactly that: grab the sentence that bugged you, add a note,
-keep reading. When you're ready, paste the whole batch — quoted and annotated — into whatever chat
-or editor your cursor is in.
+You're reading an agent's plan in the terminal, a chat answer in the browser, a diff in your editor —
+and you keep having reactions that aren't ready to send yet. Jot collects them in one place, wherever
+they came from, and pastes the whole batch back — quoted and annotated — right where your cursor is.
 
-- **Works everywhere.** Global gestures, any app: browsers, terminals, editors, chat apps.
-- **Never steals your place.** The widget floats without activating; paste lands at *your* cursor.
-- **Tiny.** One Swift file, no dependencies, no account, no network. Notes live in a local JSON file.
+**⇧⇧** capture what you selected (and note why) · **⌘⌘** jot a thought · **⌃⌃** paste it all back. That's the whole app.
+
+- **Every tool, one inbox.** Terminal agents, AI chats in the browser, code editors, PR diffs, docs —
+  anything you can select text in. Each item remembers where it came from.
+- **Never breaks your flow.** No windows to switch to, nothing to organize. Capture, keep reading,
+  dump it all when you're ready.
+- **Talk instead of type.** Dictation tools (e.g. Wispr Flow) work in the note field.
+- **Tiny and local.** One Swift file, no dependencies, no network. Notes are a local JSON file.
 
 ## Gestures
 
@@ -25,16 +30,19 @@ In the widget: **⌘↩** paste · **⌘⇧C** copy · **⌘⇧⌫** clear (with
 Click an item to edit its note; click its circle to check it. The close button tucks Jot into the
 menu bar (left-click the icon to bring it back, right-click for the menu).
 
-Pasted output is plain markdown:
+Pasted output is plain markdown, ready for any agent or chat:
 
 ```
-> It runs in a single transaction so the table is never half-migrated.
-single txn on a big table — safe under load?
+> stored in process memory.
+won't hold across instances — redis?
 
-ask for a test on the 5th-retry path
+> time.sleep(2 ** attempt)
+no jitter, and it blocks the worker
+
+overall: ask for a rollout plan
 ```
 
-<p align="center"><img src="assets/hero.png" width="800" alt="Jot widget next to an AI chat window"></p>
+<p align="center"><img src="assets/hero.png" width="800" alt="Jot collecting notes from a terminal agent, a browser chat and a code editor"></p>
 
 ## Install
 

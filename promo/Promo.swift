@@ -19,18 +19,44 @@ let selectionBlue = Color(red: 0.70, green: 0.84, blue: 1.0)
 let accent = Color(red: 0.0, green: 0.48, blue: 1.0)
 let ink = Color(red: 0.13, green: 0.14, blue: 0.16)
 
-let paragraphs = [
-    "I added a retry wrapper around the webhook dispatch. Each delivery now retries up to five times with exponential backoff, starting at 200ms.",
-    "To keep the change small, I wrote a new backoff helper in webhooks/retry.py rather than touching the shared utilities.",
-    "I also added a migration that backfills delivery_attempts for existing rows. It runs in a single transaction so the table is never half-migrated.",
-    "Tests pass locally. Want me to open a PR?",
+enum Surface: String { case terminal = "Terminal", browser = "Browser", editor = "Editor" }
+
+// Terminal agent session
+let termLines = [
+    "> add rate limiting to the public API",
+    "",
+    "● I'll add a token-bucket limiter as middleware.",
+    "● Limit: 100 req/min per API key, stored in process memory.",
+    "● Updated api/middleware.py and api/app.py",
+    "✓ 14 tests passed",
 ]
-let sentenceA = "I wrote a new backoff helper in webhooks/retry.py rather than touching the shared utilities."
-let sentenceB = "It runs in a single transaction so the table is never half-migrated."
-let noteA = "why not reuse the existing retry helper?"
-let noteB = "single txn on a big table — safe under load?"
-let noteC = "ask for a test on the 5th-retry path"
-let earlier = DemoItem(quote: nil, note: "naming: “dispatcher” vs “sender”?", app: "Assistant", age: "4m")
+let termSel = "stored in process memory."
+let termNote = "won't hold across instances — redis?"
+
+// Browser chat
+let browserQuestion = "Advisory locks or SELECT … FOR UPDATE for claiming jobs?"
+let browserParas = [
+    "Both work. Advisory locks are lighter: no row is touched, so there's no bloat from constant updates.",
+    "Advisory locks are released automatically if the session disconnects, so a crashed worker never strands a job.",
+    "FOR UPDATE SKIP LOCKED is simpler to reason about if jobs already live in a table.",
+]
+let browserSel = "Advisory locks are released automatically if the session disconnects"
+let browserNote = "true with pgbouncer transaction pooling?"
+
+// Code editor diff
+let editorLines: [(String, Character)] = [
+    ("def deliver(event):", " "),
+    ("    for attempt in range(5):", " "),
+    ("        try:", " "),
+    ("            return post(event)", " "),
+    ("        except Timeout:", " "),
+    ("            log.warning(\"retrying\", attempt=attempt)", "+"),
+    ("            time.sleep(2 ** attempt)", "+"),
+    ("    raise DeliveryFailed(event)", " "),
+]
+let editorSel = "time.sleep(2 ** attempt)"
+let editorNote = "no jitter, and it blocks the worker"
+let thought = "overall: ask for a rollout plan"
 
 struct DemoItem: Equatable {
     var quote: String?
@@ -40,14 +66,15 @@ struct DemoItem: Equatable {
 }
 
 struct SceneState {
-    var items: [DemoItem] = [earlier]
+    var surface = Surface.terminal
+    var items: [DemoItem] = []
     var flashIndex: Int?
     var highlight: (sentence: String, progress: Double)?
     var composerTarget: String?
     var composerText = ""
     var composerFocused = false
-    var chatText = ""
-    var chatFocused = false
+    var termInput = ""
+    var termFocused = false
     var keys: (caps: [String], label: String, opacity: Double)?
     var caretOn = true
     var menuSymbol = "text.quote"
@@ -64,64 +91,55 @@ func keycaps(_ t: Double, _ a: Double, _ b: Double, _ caps: [String], _ label: S
     return (caps, label, min(p(t, a, a + 0.12), 1 - p(t, b - 0.2, b)))
 }
 
-let duration = 18.0
+let duration = 20.5
+
+/// One select → ⇧⇧ → type note → ↩ beat starting at `t0`, captured from `surface`.
+func captureBeat(_ s: inout SceneState, _ t: Double, t0: Double, index: Int, surface: Surface, sel: String, note: String) {
+    if t >= t0 && t < t0 + 3.2 { s.highlight = (sel, p(t, t0, t0 + 0.6)) }
+    if let k = keycaps(t, t0 + 0.7, t0 + 1.4, ["⇧", "⇧"], "capture from \(surface.rawValue.lowercased())") { s.keys = k }
+    guard t >= t0 + 0.8 else { return }
+    let done = t >= t0 + 2.8
+    s.items.append(DemoItem(quote: sel, note: done ? note : "", app: surface.rawValue))
+    if t < t0 + 1.6 || (done && t < t0 + 3.4) { s.flashIndex = index }
+    if !done {
+        s.composerTarget = sel
+        s.composerFocused = true
+        s.composerText = typed(note, t, t0 + 1.1, t0 + 2.5)
+    }
+    if let k = keycaps(t, t0 + 2.6, t0 + 3.1, ["↩"], "save — keep reviewing") { s.keys = k }
+}
 
 func state(at t: Double) -> SceneState {
     var s = SceneState()
     s.caretOn = Int(t * 2.2) % 2 == 0
+    s.surface = t < 4.2 ? .terminal : t < 8.1 ? .browser : t < 14.3 ? .editor : .terminal
 
-    // Capture A: select → ⇧⇧ → annotate → ↩
-    if t >= 1.0 && t < 4.6 { s.highlight = (sentenceA, p(t, 1.0, 1.8)) }
-    s.keys = keycaps(t, 1.95, 2.8, ["⇧", "⇧"], "capture selection")
-    if t >= 2.15 {
-        s.items.append(DemoItem(quote: sentenceA, note: t >= 4.55 ? noteA : "", app: "Assistant"))
-        if t < 3.1 { s.flashIndex = 1 }
-        if t < 4.55 {
-            s.composerTarget = sentenceA
-            s.composerFocused = true
-            s.composerText = typed(noteA, t, 2.6, 4.2)
-        }
-        if t >= 4.55 && t < 5.3 { s.flashIndex = 1 }
-    }
-    if let k = keycaps(t, 4.3, 5.0, ["↩"], "save — back to reading") { s.keys = k }
+    captureBeat(&s, t, t0: 0.8, index: 0, surface: .terminal, sel: termSel, note: termNote)
+    captureBeat(&s, t, t0: 4.6, index: 1, surface: .browser, sel: browserSel, note: browserNote)
+    captureBeat(&s, t, t0: 8.5, index: 2, surface: .editor, sel: editorSel, note: editorNote)
 
-    // Capture B
-    if t >= 5.4 && t < 9.1 { s.highlight = (sentenceB, p(t, 5.4, 6.0)) }
-    if let k = keycaps(t, 6.15, 7.0, ["⇧", "⇧"], "capture selection") { s.keys = k }
-    if t >= 6.35 {
-        s.items.append(DemoItem(quote: sentenceB, note: t >= 9.05 ? noteB : "", app: "Assistant"))
-        if t < 7.3 { s.flashIndex = 2 }
-        if t < 9.05 {
-            s.composerTarget = sentenceB
-            s.composerFocused = true
-            s.composerText = typed(noteB, t, 6.9, 8.7)
-        }
-        if t >= 9.05 && t < 9.8 { s.flashIndex = 2 }
-    }
-    if let k = keycaps(t, 8.8, 9.5, ["↩"], "save") { s.keys = k }
-
-    // ⌘⌘ note-only thought
-    if let k = keycaps(t, 9.9, 10.7, ["⌘", "⌘"], "jot a thought") { s.keys = k }
-    if t >= 10.1 && t < 12.3 {
+    // ⌘⌘ a free-standing thought
+    if let k = keycaps(t, 11.9, 12.6, ["⌘", "⌘"], "jot a thought") { s.keys = k }
+    if t >= 12.1 && t < 13.75 {
         s.composerFocused = true
-        s.composerText = typed(noteC, t, 10.5, 11.9)
+        s.composerText = typed(thought, t, 12.4, 13.4)
     }
-    if let k = keycaps(t, 12.0, 12.7, ["↩"], "save") { s.keys = k }
-    if t >= 12.25 {
-        s.items.append(DemoItem(quote: nil, note: noteC, app: nil))
-        if t < 13.0 { s.flashIndex = 3 }
+    if let k = keycaps(t, 13.5, 14.0, ["↩"], "save") { s.keys = k }
+    if t >= 13.75 {
+        s.items.append(DemoItem(quote: nil, note: thought, app: nil))
+        if t < 14.4 { s.flashIndex = 3 }
     }
 
-    // ⌃⌃ paste everything into the chat box, clearing Jot
-    if t >= 13.0 { s.chatFocused = true }
-    if let k = keycaps(t, 13.5, 14.3, ["⌃", "⌃"], "paste at cursor & clear") { s.keys = k }
-    if t >= 13.75 {
-        s.chatText = render(s.items)
+    // Back in the agent: ⌃⌃ pastes everything at the prompt and clears Jot
+    if t >= 14.3 { s.termFocused = true }
+    if let k = keycaps(t, 14.8, 15.6, ["⌃", "⌃"], "paste into the agent") { s.keys = k }
+    if t >= 15.05 {
+        s.termInput = render(s.items)
         s.items = []
         s.flashIndex = nil
-        if t < 14.5 { s.menuSymbol = "checkmark.circle.fill" }
+        if t < 15.8 { s.menuSymbol = "checkmark.circle.fill" }
     }
-    s.endCard = p(t, 15.6, 16.3)
+    s.endCard = p(t, 17.3, 17.9)
     return s
 }
 
@@ -132,6 +150,17 @@ func render(_ items: [DemoItem]) -> String {
         if !item.note.isEmpty { parts.append(item.note) }
         return parts.joined(separator: "\n")
     }.joined(separator: "\n\n")
+}
+
+/// `text` with the first `progress` of `sel` given a selection background.
+func highlighted(_ text: String, _ h: (sentence: String, progress: Double)?,
+                 color: Color = selectionBlue) -> AttributedString {
+    var a = AttributedString(text)
+    if let h, let r = a.range(of: h.sentence) {
+        let end = a.index(r.lowerBound, offsetByCharacters: Int(Double(h.sentence.count) * h.progress))
+        a[r.lowerBound..<end].backgroundColor = color
+    }
+    return a
 }
 
 // MARK: - Scene views
@@ -155,12 +184,13 @@ struct Wallpaper: View {
 }
 
 struct MenuBar: View {
+    var app: String
     var count: Int
     var symbol: String
     var body: some View {
         HStack(spacing: 18) {
             Image(systemName: "apple.logo").font(.system(size: 14, weight: .semibold))
-            Text("Assistant").font(.system(size: 13, weight: .bold))
+            Text(app).font(.system(size: 13, weight: .bold))
             ForEach(["File", "Edit", "View", "Window"], id: \.self) { Text($0).font(.system(size: 13)) }
             Spacer()
             HStack(spacing: 4) {
@@ -189,77 +219,120 @@ struct TrafficLights: View {
     }
 }
 
-struct ChatWindow: View {
-    var s: SceneState
+struct WindowChrome<Content: View>: View {
+    var title: String
+    var dark = false
+    @ViewBuilder var content: Content
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
                 HStack { TrafficLights(); Spacer() }
-                Text("Assistant — webhook retries").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                Text(title).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(dark ? Color(white: 0.7) : .secondary)
             }
-            .padding(.horizontal, 14).frame(height: 40)
-            .background(Color(white: 0.965))
-            Divider()
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Spacer()
-                    Text("Can you add retries to the webhook handler?")
-                        .font(.system(size: 15)).padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.93)))
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    Circle().fill(LinearGradient(colors: [Color(red: 1, green: 0.7, blue: 0.4), Color(red: 0.95, green: 0.45, blue: 0.3)],
-                                                 startPoint: .top, endPoint: .bottom))
-                        .frame(width: 28, height: 28)
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(paragraphs, id: \.self) { para in
-                            Text(attributed(para)).font(.system(size: 15)).lineSpacing(4).foregroundStyle(ink)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(24)
-            input
+            .padding(.horizontal, 14).frame(height: 38)
+            .background(dark ? Color(white: 0.16) : Color(white: 0.965))
+            content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .background(.white)
+        .background(dark ? Color(red: 0.09, green: 0.10, blue: 0.12) : .white)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.25), radius: 30, y: 16)
     }
+}
 
-    private var input: some View {
-        HStack(alignment: .bottom) {
-            Group {
-                if s.chatText.isEmpty {
-                    HStack(spacing: 0) {
-                        if s.chatFocused { Caret(on: s.caretOn) }
-                        Text("Reply…").foregroundStyle(.tertiary)
+struct TerminalWindow: View {
+    var s: SceneState
+    let green = Color(red: 0.45, green: 0.85, blue: 0.55)
+    let fg = Color(white: 0.88)
+
+    var body: some View {
+        WindowChrome(title: "agent — ~/api", dark: true) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(termLines, id: \.self) { line in
+                    Text(highlighted(line, s.highlight, color: Color(red: 0.22, green: 0.38, blue: 0.62)))
+                        .foregroundStyle(line.hasPrefix("✓") ? green : line.hasPrefix(">") ? Color(white: 0.6) : fg)
+                }
+                Spacer(minLength: 0)
+                Rectangle().fill(Color(white: 0.25)).frame(height: 1)
+                HStack(alignment: .top, spacing: 8) {
+                    Text(">").foregroundStyle(green)
+                    if s.termInput.isEmpty {
+                        if s.termFocused { Rectangle().fill(fg).frame(width: 8, height: 16).opacity(s.caretOn ? 1 : 0) }
+                    } else {
+                        Text(s.termInput).foregroundStyle(fg).fixedSize(horizontal: false, vertical: true)
                     }
-                } else {
-                    (Text(s.chatText) + Text(s.caretOn ? " ▏" : "  ").foregroundColor(accent))
-                        .foregroundStyle(ink).lineSpacing(2)
                 }
             }
-            .font(.system(size: 13.5))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "arrow.up.circle.fill").font(.system(size: 26))
-                .foregroundStyle(s.chatText.isEmpty ? Color(white: 0.8) : ink)
+            .font(.system(size: 14, design: .monospaced))
+            .padding(22)
         }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14).stroke(s.chatFocused ? accent.opacity(0.6) : Color(white: 0.85), lineWidth: 1.5))
-        .padding([.horizontal, .bottom], 20)
     }
+}
 
-    private func attributed(_ para: String) -> AttributedString {
-        var a = AttributedString(para)
-        if let h = s.highlight, let r = a.range(of: h.sentence) {
-            let n = Int(Double(h.sentence.count) * h.progress)
-            let end = a.index(r.lowerBound, offsetByCharacters: n)
-            a[r.lowerBound..<end].backgroundColor = selectionBlue
+struct BrowserWindow: View {
+    var s: SceneState
+    var body: some View {
+        WindowChrome(title: "") {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.left").foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    HStack {
+                        Image(systemName: "lock.fill").font(.system(size: 10))
+                        Text("chat.example.com")
+                    }
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.94)))
+                }
+                .padding(.horizontal, 14).padding(.bottom, 10)
+                .background(Color(white: 0.965))
+                Divider()
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Spacer()
+                        Text(browserQuestion).font(.system(size: 15))
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.93)))
+                    }
+                    ForEach(browserParas, id: \.self) { para in
+                        Text(highlighted(para, s.highlight)).font(.system(size: 15)).lineSpacing(4)
+                            .foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(28)
+            }
         }
-        return a
+    }
+}
+
+struct EditorWindow: View {
+    var s: SceneState
+    var body: some View {
+        WindowChrome(title: "retry.py — api") { VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text("retry.py").font(.system(size: 12)).padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(.white)
+                Spacer()
+            }
+            .background(Color(white: 0.95))
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(editorLines.enumerated()), id: \.offset) { i, line in
+                    HStack(spacing: 14) {
+                        Text("\(i + 12)").foregroundStyle(.tertiary).frame(width: 26, alignment: .trailing)
+                        Text(line.1 == "+" ? "+" : " ").foregroundStyle(.green)
+                        Text(highlighted(line.0, s.highlight)).foregroundStyle(ink)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4)
+                    .background(line.1 == "+" ? Color.green.opacity(0.10) : .clear)
+                }
+            }
+            .font(.system(size: 14, design: .monospaced))
+            .padding(.vertical, 16)
+            Spacer(minLength: 0)
+        } }
     }
 }
 
@@ -409,7 +482,8 @@ struct EndCard: View {
             VStack(spacing: 22) {
                 Image(nsImage: icon).resizable().frame(width: 180, height: 180)
                 Text("Jot").font(.system(size: 64, weight: .bold)).foregroundStyle(ink)
-                Text("Collect thoughts & questions while you review AI output.")
+                Text("Collect thoughts while you review AI output —\nin every agent, browser and editor.")
+                    .multilineTextAlignment(.center)
                     .font(.system(size: 24, weight: .medium)).foregroundStyle(ink.opacity(0.8))
                 HStack(spacing: 28) {
                     ForEach([("⇧⇧", "capture"), ("⌘⌘", "note"), ("⌃⌃", "paste & clear")], id: \.0) { k, v in
@@ -422,7 +496,7 @@ struct EndCard: View {
                     }
                 }
                 .foregroundStyle(ink)
-                Text("Free & open source · macOS 14+").font(.system(size: 16)).foregroundStyle(ink.opacity(0.6))
+                Text("Three gestures. No setup, no account. Free & open source · macOS 14+").font(.system(size: 16)).foregroundStyle(ink.opacity(0.6))
             }
         }
     }
@@ -434,12 +508,19 @@ struct Scene: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Wallpaper()
-            MenuBar(count: s.items.count, symbol: s.menuSymbol)
-            ChatWindow(s: s).frame(width: 780, height: 700).offset(x: 50, y: 62)
+            MenuBar(app: s.surface.rawValue, count: s.items.count, symbol: s.menuSymbol)
+            Group {
+                switch s.surface {
+                case .terminal: TerminalWindow(s: s)
+                case .browser: BrowserWindow(s: s)
+                case .editor: EditorWindow(s: s)
+                }
+            }
+            .frame(width: 780, height: 700).offset(x: 50, y: 62)
             WidgetMock(s: s).frame(width: 360, height: 560).offset(x: 870, y: 100)
             if let k = s.keys {
                 Keycaps(caps: k.caps, label: k.label).opacity(k.opacity)
-                    .frame(width: 780, height: 150).offset(x: 50, y: 400)
+                    .frame(width: 360, height: 120).offset(x: 870, y: 672)
             }
             EndCard(icon: icon).opacity(s.endCard)
         }
@@ -523,10 +604,10 @@ MainActor.assumeIsolated {
     let only = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "all"
 
     if only == "all" || only == "stills" {
-        writePNG(image(Scene(s: state(at: 7.9), icon: icon), scale: 2), out.appendingPathComponent("hero.png"))
-        writePNG(image(WidgetMock(s: state(at: 12.6)).frame(width: 360, height: 560).padding(40)
+        writePNG(image(Scene(s: state(at: 10.3), icon: icon), scale: 2), out.appendingPathComponent("hero.png"))
+        writePNG(image(WidgetMock(s: state(at: 14.2)).frame(width: 360, height: 560).padding(40)
             .background(Wallpaper()), scale: 2), out.appendingPathComponent("widget.png"))
-        for t in [1.5, 3.5, 10.8, 14.2, 17] {
+        for t in [2.5, 6.4, 10.3, 12.9, 15.5, 19] {
             try? FileManager.default.createDirectory(atPath: "promo/frames", withIntermediateDirectories: true)
             writePNG(image(Scene(s: state(at: t), icon: icon), scale: 1), URL(fileURLWithPath: "promo/frames/t\(t).png"))
         }

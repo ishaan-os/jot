@@ -29,7 +29,9 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign - $APP
+# Pin the designated requirement to the bundle id (ad-hoc signatures otherwise default to
+# the per-build cdhash, which makes macOS forget the Accessibility grant on every rebuild).
+codesign --force --sign - --requirements "=designated => identifier \"com.ishaan.jot\"" $APP
 pkill -x Jot || true
 rm -rf ~/Applications/Jot.app && cp -R $APP ~/Applications/
 echo "Installed ~/Applications/Jot.app — run: open ~/Applications/Jot.app"
