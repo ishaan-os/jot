@@ -27,8 +27,26 @@ they came from, and pastes the whole batch back — quoted and annotated — rig
 | **⌃⌃** | tap Control twice | Paste checked items (or all) at your cursor, then clear them |
 
 In the widget: **⌘↩** paste · **⌘⇧C** copy · **⌘⇧⌫** clear (with undo) · **⌘⇧A** select all/none.
-Click an item to edit its note; click its circle to check it. The close button tucks Jot into the
+Click an item to edit its note; click its circle to check it; right-click a section tab to rename or delete it. The close button tucks Jot into the
 menu bar (left-click the icon to bring it back, right-click for the menu).
+
+### Sections (optional)
+
+Jot is one list until you want more. Type `/new auth refactor` in the note field and a tab bar
+appears; everything you capture or jot now goes to **auth refactor** until you switch.
+**⇧⇥** in the widget cycles sections (from anywhere: **⌘⌘** then **⇧⇥**), and **⌃⌃**, Copy and
+Clear only ever touch the section you're in.
+
+### Commands
+
+Type `/` in the note field (**⇥** completes):
+
+| | |
+|---|---|
+| `/new name` | start a section and write to it |
+| `/go name` | switch section (`/go inbox`, prefixes work) |
+| `/rename name` · `/delete` | rename or delete this section (delete is undoable) |
+| `/clear` · `/copy` · `/paste` | act on this section's notes |
 
 Pasted output is plain markdown, ready for any agent or chat:
 
@@ -69,7 +87,7 @@ Right-click the menu-bar icon → **Launch at Login** to keep it around.
 - Capture reads the selection via the Accessibility API; apps that don't expose it (many terminals,
   Electron) fall back to a synthetic ⌘C with your clipboard restored right after.
 - The widget is a non-activating `NSPanel`, which is why paste can send ⌘V to the app you were in.
-- Items: `~/Library/Application Support/Jot/items.json` · debug log: `~/Library/Logs/Jot.log`.
+- Notes and sections: `~/Library/Application Support/Jot/state.json` · debug log: `~/Library/Logs/Jot.log`.
 
 ## Media
 
