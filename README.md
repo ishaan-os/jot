@@ -1,84 +1,97 @@
 <p align="center"><img src="assets/icon-1024.png" width="128" alt="Jot icon"></p>
 <h1 align="center">Jot</h1>
-<p align="center"><b>A scratchpad for reviewing AI output — in every agent, browser and editor.</b><br>
+<p align="center"><b>A scratchpad for reviewing AI output — in your agent, your docs and your PRs.</b><br>
 Three gestures. No setup, no account, no sync.</p>
 
-<p align="center"><img src="assets/demo.gif" alt="Jot demo: capture from a terminal agent, a browser chat and a code editor with ⇧⇧, jot a thought with ⌘⌘, paste it all back into the agent with ⌃⌃"></p>
+<p align="center"><img src="assets/demo.gif" alt="Jot demo: start a section with /new, capture from a terminal agent, a design doc and a pull-request diff with ⇧⇧, jot a thought with ⌘⌘, paste it all back into the agent with ⌃⌃"></p>
 
-You're reading an agent's plan in the terminal, a chat answer in the browser, a diff in your editor —
-and you keep having reactions that aren't ready to send yet. Jot collects them in one place, wherever
-they came from, and pastes the whole batch back — quoted and annotated — right where your cursor is.
+You're reading an agent's plan in the terminal, a design doc, a PR diff — and you keep having
+reactions that aren't ready to send yet. Jot collects them in one place, wherever they came from,
+and pastes the whole batch back — quoted and annotated — right where your cursor is.
 
 **⇧⇧** capture what you selected (and note why) · **⌘⌘** jot a thought · **⌃⌃** paste it all back. That's the whole app.
 
-- **Every tool, one inbox.** Terminal agents, AI chats in the browser, code editors, PR diffs, docs —
-  anything you can select text in. Each item remembers where it came from.
-- **Never breaks your flow.** No windows to switch to, nothing to organize. Capture, keep reading,
+- **Every tool, one inbox.** Terminals, browsers, editors, docs — anything you can select text in.
+  Each note remembers where it came from.
+- **Never breaks your flow.** Nothing to organize, no window to go find. Capture, keep reading,
   dump it all when you're ready.
-- **Talk instead of type.** Dictation tools (e.g. Wispr Flow) work in the note field.
-- **Tiny and local.** One Swift file, no dependencies, no network. Notes are a local JSON file.
+- **Talk instead of type.** Dictation (Wispr Flow, macOS dictation) works in the note field.
+- **Tiny and local.** One Swift file, no dependencies, no network.
+
+## Use cases
+
+- **Reviewing an agent's work.** Batch your pushback while you read its plan, diff and summary, then
+  ⌃⌃ it all into the prompt as one clear reply instead of interrupting five times.
+- **PR review.** Capture the lines that bother you with a note each; paste into the review or back
+  to the agent that wrote it.
+- **Doc and spec review.** Collect questions as you read, paste them into comments or a chat.
+- **Parallel sessions.** One section per agent or task (`/new api`, `/new web`); ⌃⌃ only pastes the
+  section you're in.
 
 ## Gestures
 
 | | | |
 |---|---|---|
-| **⇧⇧** | tap Shift twice | Capture the selected text, then type an optional note (**↩** saves and returns you to your app, **esc** skips the note) |
-| **⌘⌘** | tap Command twice | Jot a thought in the widget; **↩** saves and keeps the cursor for the next one. Again to go back |
-| **⌃⌃** | tap Control twice | Paste checked items (or all) at your cursor, then clear them |
+| **⇧⇧** | tap Shift twice | Capture the selected text and type an optional note (**↩** saves and returns you to your app, **esc** skips the note) |
+| **⌘⌘** | tap Command twice | Jot a thought; **↩** saves and keeps the cursor for the next one. **⌘⌘** again (or **esc**) to go back |
+| **⌃⌃** | tap Control twice | Paste this section's notes (checked ones, or all) at your cursor, then clear them |
 
-In the widget: **⌘↩** paste · **⌘⇧C** copy · **⌘⇧⌫** clear (with undo) · **⌘⇧A** select all/none.
-Click an item to edit its note; click its circle to check it; right-click a section tab to rename or delete it. The close button tucks Jot into the
-menu bar (left-click the icon to bring it back, right-click for the menu).
-
-### Sections (optional)
-
-Jot is one list until you want more. Type `/new auth refactor` in the note field and a tab bar
-appears; everything you capture or jot now goes to **auth refactor** until you switch.
-**⇧⇥** in the widget cycles sections (from anywhere: **⌘⌘** then **⇧⇥**), and **⌃⌃**, Copy and
-Clear only ever touch the section you're in.
-
-### Commands
-
-Type `/` in the note field (**⇥** completes):
-
-| | |
-|---|---|
-| `/new name` | start a section and write to it |
-| `/go name` | switch section (`/go inbox`, prefixes work) |
-| `/rename name` · `/delete` | rename or delete this section (delete is undoable) |
-| `/clear` · `/copy` · `/paste` | act on this section's notes |
+In the widget: **⌘↩** paste · **⌘⇧C** copy · **⌘⇧⌫** clear (undoable) · **⌘⇧A** select all/none ·
+**⇧⇥** next section. Click a note to edit it; click its circle to check it. The close button tucks
+Jot into the menu bar — left-click the icon to bring it back, right-click for the menu.
 
 Pasted output is plain markdown, ready for any agent or chat:
 
 ```
-> stored in process memory.
-won't hold across instances — redis?
+> Limits reset at the top of every minute.
+fixed window → bursts at :00; sliding?
 
-> time.sleep(2 ** attempt)
-no jitter, and it blocks the worker
+> return Response(status=429)
+missing Retry-After header
 
-overall: ask for a rollout plan
+ask for a load test before merge
 ```
 
-<p align="center"><img src="assets/hero.png" width="800" alt="Jot collecting notes from a terminal agent, a browser chat and a code editor"></p>
+## Sections and commands
+
+Jot is one list until you want more. Type `/new rate-limit review` in the note field and a tab bar
+appears; everything you capture or jot goes there until you switch. **⇧⇥** cycles sections (from
+anywhere: **⌘⌘**, then **⇧⇥**). Paste, copy and clear only ever touch the section you're in.
+
+Type `/` in the note field to see commands; **⇥** completes.
+
+| | |
+|---|---|
+| `/new name` | start a section and write to it |
+| `/go name` | switch section (`/go inbox`; prefixes work) |
+| `/rename name` · `/delete` | rename or delete this section (delete is undoable) |
+| `/clear` · `/copy` · `/paste` | act on this section's notes |
+
+<p align="center"><img src="assets/hero.png" width="800" alt="Jot collecting notes into a named section from a pull-request diff"></p>
 
 ## Install
 
 Requires macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
-git clone <this repo> && cd jot
+git clone https://github.com/ishaan-os/jot.git && cd jot
 ./build.sh                  # builds and installs ~/Applications/Jot.app
 open ~/Applications/Jot.app
 ```
 
-Then allow Jot in **System Settings → Privacy & Security → Accessibility** (the widget shows a
-banner until you do). Jot needs it to read your selection and to type the paste for you.
-
-> Builds are ad-hoc signed, so macOS forgets the Accessibility grant after every rebuild —
-> remove Jot from the list and add it again.
+Then allow Jot in **System Settings → Privacy & Security → Accessibility** — the widget shows a
+banner until you do. Jot needs it to read your selection and to type the paste for you.
 
 Right-click the menu-bar icon → **Launch at Login** to keep it around.
+
+## Update
+
+```sh
+cd jot && git pull && ./build.sh && open ~/Applications/Jot.app
+```
+
+Your notes carry over. If the Accessibility banner shows up after an update, switch Jot off and on
+in the Accessibility list.
 
 ## How it works
 
@@ -86,7 +99,8 @@ Right-click the menu-bar icon → **Launch at Login** to keep it around.
   twice within ~0.4s with nothing else in between, so Shift-typing and Shift-clicking don't trigger it.
 - Capture reads the selection via the Accessibility API; apps that don't expose it (many terminals,
   Electron) fall back to a synthetic ⌘C with your clipboard restored right after.
-- The widget is a non-activating `NSPanel`, which is why paste can send ⌘V to the app you were in.
+- The widget floats without taking focus until you type in it, and hands focus back to your app
+  before pasting — so ⌘V lands at your cursor.
 - Notes and sections: `~/Library/Application Support/Jot/state.json` · debug log: `~/Library/Logs/Jot.log`.
 
 ## Media
@@ -94,7 +108,7 @@ Right-click the menu-bar icon → **Launch at Login** to keep it around.
 Everything under `assets/` is rendered from a scripted SwiftUI mock (`promo/Promo.swift`) — no screen
 recording. `promo/render.sh` regenerates `hero.png`, `widget.png`, `demo.gif` and `demo.mp4`
 (or `promo/bin/promo assets frames <dir>` dumps a 30fps PNG sequence for ffmpeg).
-The icon is `promo/icon.svg`.
+The icon is `promo/icon.svg`; `promo/make-icns.swift` turns it into `AppIcon.icns`.
 
 ## Credits
 
