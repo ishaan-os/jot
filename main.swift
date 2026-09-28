@@ -9,6 +9,7 @@
 // Paste hands focus back to the app you were in first, so it lands at that app's cursor.
 
 import AppKit
+import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
 
@@ -455,6 +456,23 @@ enum Keys {
     }
 }
 
+/// One global chord for show/hide. Carbon hot keys need no Accessibility permission.
+enum HotKey {
+    private static var action: (() -> Void)?
+    private static var ref: EventHotKeyRef?
+
+    static func register(key: Int, modifiers: Int, _ handler: @escaping () -> Void) {
+        action = handler
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            DispatchQueue.main.async { HotKey.action?() }
+            return noErr
+        }, 1, &spec, nil, nil)
+        RegisterEventHotKey(UInt32(key), UInt32(modifiers), EventHotKeyID(signature: OSType(0x4A4F_5421), id: 1),
+                            GetApplicationEventTarget(), 0, &ref)
+    }
+}
+
 /// Detects a lone modifier tapped twice (press+release with nothing else in between).
 final class DoubleTap {
     enum Mod { case shift, command, control }
@@ -794,8 +812,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .control: self?.pasteItems()
         }
     }
-    /// True while the widget is open only because ⌘⌘ summoned it from the menu bar.
-    private var summoned = false
     /// The app to reactivate when you leave the composer.
     private var returnTo: NSRunningApplication?
 
@@ -806,6 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildWidget()
         buildStatusItem()
         taps.install()
+        HotKey.register(key: kVK_ANSI_J, modifiers: controlKey | cmdKey) { [weak self] in self?.toggleWidget() }
         // Inside the widget: ⇧⇥ cycles sections, ⇥ completes a /command.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, self.widget.isKeyWindow, e.keyCode == 48 else { return e }
@@ -860,16 +877,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
+    /// Only the close button, ⌃⌘J and the menu hide Jot; anything that opens it leaves it open.
     private func setWidgetVisible(_ visible: Bool) {
-        summoned = false
-        if visible { widget.orderFrontRegardless() } else { widget.orderOut(nil) }
+        if visible {
+            widget.orderFrontRegardless()
+        } else {
+            releaseFocus()
+            widget.orderOut(nil)
+        }
         UserDefaults.standard.set(visible, forKey: "widgetVisible")
     }
 
     @objc func toggleWidget() { setWidgetVisible(!widget.isVisible) }
 
-    /// Hands the keyboard back to the app you were in (the panel never activated Jot,
-    /// so ordering it out returns key focus without switching apps).
     /// Typing in the widget activates Jot (dictation tools only insert into the frontmost app's
     /// focused field); remember who was frontmost so we can hand focus back.
     func windowDidBecomeKey(_ notification: Notification) {
@@ -881,15 +901,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidResignActive(_ notification: Notification) { returnTo = nil }
 
-    /// Hands the keyboard back to the app you were in.
+    /// Hands the keyboard back to the app you were in. The widget stays where it is — no
+    /// hide/re-show cycle, which used to bounce it to another display.
     private func releaseFocus() {
         guard widget.isKeyWindow else { return }
-        widget.orderOut(nil)
-        if summoned { summoned = false } else { widget.orderFrontRegardless() }
         if let app = returnTo {
             returnTo = nil
             NSApp.yieldActivation(to: app)
             app.activate()
+        } else {
+            NSApp.deactivate()
         }
     }
 
@@ -904,7 +925,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         menu = NSMenu()
-        menu.addItem(withTitle: "Show / Hide Widget", action: #selector(toggleWidget), keyEquivalent: "")
+        let toggle = menu.addItem(withTitle: "Show / Hide Jot", action: #selector(toggleWidget), keyEquivalent: "j")
+        toggle.keyEquivalentModifierMask = [.control, .command]
         menu.addItem(withTitle: "Paste at Cursor  (⌃⌃)", action: #selector(pasteFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Copy", action: #selector(copyFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Clear", action: #selector(clearFromMenu), keyEquivalent: "")
@@ -1005,10 +1027,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func beginNote() {
         if widget.isKeyWindow { return releaseFocus() }
-        if !widget.isVisible {
-            summoned = true
-            widget.orderFrontRegardless()
-        }
+        if !widget.isVisible { setWidgetVisible(true) }
         store.beginNote()
         widget.makeKey()
     }
