@@ -39,7 +39,7 @@ and pastes the whole batch back — quoted and annotated — right where your cu
 In the widget: **⌘↩** paste · **⌘⇧C** copy · **⌘⇧⌫** clear (undoable) · **⌘⇧A** select all/none ·
 **⇧⇥** next section. Click a note to edit it; click its circle to check it.
 
-Jot stays open until you close it. **⌃⌘J** shows or hides it from anywhere (so does clicking the
+Jot stays open until you close it. **⌃⇧J** shows or hides it from anywhere (so does clicking the
 menu-bar icon); right-click the icon for the menu.
 
 Pasted output is plain markdown, ready for any agent or chat:

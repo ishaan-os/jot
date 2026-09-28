@@ -461,15 +461,19 @@ enum HotKey {
     private static var action: (() -> Void)?
     private static var ref: EventHotKeyRef?
 
-    static func register(key: Int, modifiers: Int, _ handler: @escaping () -> Void) {
+    /// Exclusive registration fails (instead of silently losing to another app) if the chord is taken.
+    @discardableResult
+    static func register(key: Int, modifiers: Int, _ handler: @escaping () -> Void) -> Bool {
         action = handler
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
             DispatchQueue.main.async { HotKey.action?() }
             return noErr
         }, 1, &spec, nil, nil)
-        RegisterEventHotKey(UInt32(key), UInt32(modifiers), EventHotKeyID(signature: OSType(0x4A4F_5421), id: 1),
-                            GetApplicationEventTarget(), 0, &ref)
+        let status = RegisterEventHotKey(UInt32(key), UInt32(modifiers), EventHotKeyID(signature: OSType(0x4A4F_5421), id: 1),
+                                         GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &ref)
+        log("show/hide hotkey registered: \(status == noErr) (status \(status))")
+        return status == noErr
     }
 }
 
@@ -822,7 +826,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildWidget()
         buildStatusItem()
         taps.install()
-        HotKey.register(key: kVK_ANSI_J, modifiers: controlKey | cmdKey) { [weak self] in self?.toggleWidget() }
+        HotKey.register(key: kVK_ANSI_J, modifiers: controlKey | shiftKey) { [weak self] in self?.toggleWidget() }
         // Inside the widget: ⇧⇥ cycles sections, ⇥ completes a /command.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, self.widget.isKeyWindow, e.keyCode == 48 else { return e }
@@ -840,9 +844,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             log("trust changed: \(Keys.trusted)")
             if Keys.trusted { self.taps.install() }
         }
-        if UserDefaults.standard.object(forKey: "widgetVisible") as? Bool ?? true {
-            widget.orderFrontRegardless()
-        }
+        setWidgetVisible(true)
+    }
+
+    /// Opening Jot again from Applications/Spotlight while it's running brings the widget back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        setWidgetVisible(true)
+        return false
     }
 
     // MARK: Widget
@@ -877,15 +885,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
-    /// Only the close button, ⌃⌘J and the menu hide Jot; anything that opens it leaves it open.
+    /// Only the close button, ⌃⇧J and the menu hide Jot; anything that opens it leaves it open.
     private func setWidgetVisible(_ visible: Bool) {
         if visible {
+            if !widget.isVisible { moveToActiveScreen() }
             widget.orderFrontRegardless()
         } else {
             releaseFocus()
             widget.orderOut(nil)
         }
-        UserDefaults.standard.set(visible, forKey: "widgetVisible")
+    }
+
+    /// Shows up on the display you're working on, keeping the same distance from the top-right
+    /// corner it had on its previous display.
+    private func moveToActiveScreen() {
+        guard let target = activeScreen(), let from = widget.screen ?? NSScreen.main, target != from else { return }
+        let f = widget.frame, a = from.visibleFrame, b = target.visibleFrame
+        var origin = NSPoint(x: b.maxX - (a.maxX - f.minX), y: b.maxY - (a.maxY - f.minY))
+        origin.x = min(max(origin.x, b.minX), b.maxX - f.width)
+        origin.y = min(max(origin.y, b.minY), b.maxY - f.height)
+        widget.setFrameOrigin(origin)
+    }
+
+    /// The display holding the frontmost app's focused window (via Accessibility), else the one
+    /// under the mouse.
+    private func activeScreen() -> NSScreen? {
+        if Keys.trusted, let app = NSWorkspace.shared.frontmostApplication,
+           app.bundleIdentifier != Bundle.main.bundleIdentifier {
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            var window: CFTypeRef?, pos: CFTypeRef?, size: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success,
+               let window, CFGetTypeID(window) == AXUIElementGetTypeID() {
+                let w = window as! AXUIElement
+                var p = CGPoint.zero, sz = CGSize.zero
+                if AXUIElementCopyAttributeValue(w, kAXPositionAttribute as CFString, &pos) == .success,
+                   AXUIElementCopyAttributeValue(w, kAXSizeAttribute as CFString, &size) == .success,
+                   AXValueGetValue(pos as! AXValue, .cgPoint, &p), AXValueGetValue(size as! AXValue, .cgSize, &sz) {
+                    // AX uses top-left origin on the primary display; AppKit uses bottom-left.
+                    let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+                    let center = NSPoint(x: p.x + sz.width / 2, y: primaryHeight - (p.y + sz.height / 2))
+                    if let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) { return screen }
+                }
+            }
+        }
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first { $0.frame.contains(mouse) }
     }
 
     @objc func toggleWidget() { setWidgetVisible(!widget.isVisible) }
@@ -926,7 +970,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu = NSMenu()
         let toggle = menu.addItem(withTitle: "Show / Hide Jot", action: #selector(toggleWidget), keyEquivalent: "j")
-        toggle.keyEquivalentModifierMask = [.control, .command]
+        toggle.keyEquivalentModifierMask = [.control, .shift]
         menu.addItem(withTitle: "Paste at Cursor  (⌃⌃)", action: #selector(pasteFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Copy", action: #selector(copyFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "Clear", action: #selector(clearFromMenu), keyEquivalent: "")
