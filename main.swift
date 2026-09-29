@@ -826,7 +826,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildWidget()
         buildStatusItem()
         taps.install()
-        HotKey.register(key: kVK_ANSI_J, modifiers: controlKey | shiftKey) { [weak self] in self?.toggleWidget() }
+        HotKey.register(key: kVK_ANSI_J, modifiers: controlKey | shiftKey) { [weak self] in self?.summonOrHide() }
         // Inside the widget: ⇧⇥ cycles sections, ⇥ completes a /command.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, self.widget.isKeyWindow, e.keyCode == 48 else { return e }
@@ -933,6 +933,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func toggleWidget() { setWidgetVisible(!widget.isVisible) }
+
+    /// ⌃⇧J: hide when visible (to get the screen space back), otherwise show it ready to use —
+    /// cursor in the note field, so ⇧⇥ / ⌘↩ / typing work immediately.
+    private func summonOrHide() {
+        if widget.isVisible { return setWidgetVisible(false) }
+        setWidgetVisible(true)
+        store.focusRequest += 1
+        widget.makeKey()
+    }
 
     /// Typing in the widget activates Jot (dictation tools only insert into the frontmost app's
     /// focused field); remember who was frontmost so we can hand focus back.
