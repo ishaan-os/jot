@@ -13,8 +13,10 @@ import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
 
+let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Jot.log")
+
 func log(_ message: String) {
-    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Jot.log")
+    let url = logURL
     let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
     if let h = try? FileHandle(forWritingTo: url) {
         h.seekToEndOfFile()
@@ -822,7 +824,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var clearAfter: Bool { UserDefaults.standard.object(forKey: "clearAfter") as? Bool ?? true }
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        log("launch: trusted=\(Keys.trusted)")
+        // Keep the debug log small: start over once it passes 1 MB.
+        if let size = try? logURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 1_000_000 {
+            try? FileManager.default.removeItem(at: logURL)
+        }
+        log("launch: v\(Self.version) trusted=\(Keys.trusted)")
         buildWidget()
         buildStatusItem()
         taps.install()
@@ -978,6 +984,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         menu = NSMenu()
+        menu.addItem(withTitle: "About Jot \(Self.version)…", action: #selector(openProjectPage), keyEquivalent: "")
+        menu.addItem(.separator())
         let toggle = menu.addItem(withTitle: "Show / Hide Jot", action: #selector(toggleWidget), keyEquivalent: "j")
         toggle.keyEquivalentModifierMask = [.control, .shift]
         menu.addItem(withTitle: "Paste at Cursor  (⌃⌃)", action: #selector(pasteFromMenu), keyEquivalent: "")
@@ -1056,6 +1064,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func openAccessibility() { Keys.openAccessibilitySettings() }
+
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+
+    @objc func openProjectPage() { NSWorkspace.shared.open(URL(string: "https://github.com/ishaan-os/jot")!) }
 
     // MARK: Actions
 

@@ -1,8 +1,10 @@
 #!/bin/zsh
-# Builds Jot.app and installs it to ~/Applications.
+# Builds Jot.app and installs it to ~/Applications (--no-install: just build into build/).
 set -e
 cd "$(dirname "$0")"
 APP=build/Jot.app
+BUNDLE_ID=io.github.ishaan-os.jot
+VERSION=$(cat VERSION)
 rm -rf build && mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 FLAGS=()
 # Some Command Line Tools installs ship a stale duplicate SwiftBridging modulemap that breaks
@@ -19,19 +21,21 @@ cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.ishaan.jot</string>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleName</key><string>Jot</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleExecutable</key><string>Jot</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
 # Pin the designated requirement to the bundle id (ad-hoc signatures otherwise default to
 # the per-build cdhash, which makes macOS forget the Accessibility grant on every rebuild).
-codesign --force --sign - --requirements "=designated => identifier \"com.ishaan.jot\"" $APP
+codesign --force --sign - --requirements "=designated => identifier \"$BUNDLE_ID\"" $APP
+[[ "$1" == "--no-install" ]] && { echo "Built $APP ($VERSION)"; exit 0; }
 pkill -x Jot || true
 rm -rf ~/Applications/Jot.app && cp -R $APP ~/Applications/
 echo "Installed ~/Applications/Jot.app — run: open ~/Applications/Jot.app"

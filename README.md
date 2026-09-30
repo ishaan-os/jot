@@ -92,8 +92,37 @@ Right-click the menu-bar icon → **Launch at Login** to keep it around.
 cd jot && git pull && ./build.sh && open ~/Applications/Jot.app
 ```
 
-Your notes carry over. If the Accessibility banner shows up after an update, switch Jot off and on
-in the Accessibility list.
+Your notes and the Accessibility permission carry over. See [CHANGELOG.md](CHANGELOG.md) for
+what's new; your version is under right-click on the menu-bar icon → **About Jot**.
+
+## Privacy
+
+Jot never touches the network. Notes stay in a local file on your Mac. The Accessibility
+permission is used for three things: reading the text you select when you press ⇧⇧, watching
+modifier keys to spot double taps (it only checks *whether* another key was pressed in between,
+never *which*, and records nothing), and typing ⌘V when you paste.
+
+## Troubleshooting
+
+- **⇧⇧ does nothing / paste doesn't type** — Accessibility isn't granted (the widget shows a yellow
+  banner). Click it, or enable Jot in System Settings → Privacy & Security → Accessibility.
+- **A gesture triggers another app** — some tools claim the same keys (e.g. ⌥⌥ in the Claude desktop
+  app, ⌃⌥ in Wispr Flow). Jot's gestures were picked to avoid the common ones; open an issue with
+  what clashed.
+- **Capture grabs a whole line** — some editors copy the current line when nothing is selected.
+  Drop the quote with its ⓧ in the note field, or delete the note.
+- **Anything else** — `~/Library/Logs/Jot.log` shows what Jot saw; include its tail in an issue.
+
+## Uninstall
+
+Quit Jot from its menu, then:
+
+```sh
+rm -rf ~/Applications/Jot.app ~/Library/Application\ Support/Jot ~/Library/Logs/Jot.log
+defaults delete io.github.ishaan-os.jot
+```
+
+and remove Jot from the Accessibility list.
 
 ## How it works
 
@@ -104,6 +133,10 @@ in the Accessibility list.
 - The widget floats without taking focus until you type in it, and hands focus back to your app
   before pasting — so ⌘V lands at your cursor.
 - Notes and sections: `~/Library/Application Support/Jot/state.json` · debug log: `~/Library/Logs/Jot.log`.
+- Builds are ad-hoc signed with a designated requirement pinned to the bundle id, so macOS keeps the
+  Accessibility grant across rebuilds instead of treating every build as a new app.
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Media
 
