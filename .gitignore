@@ -2,3 +2,4 @@ build/
 .toolchain-fix/
 promo/bin/
 promo/frames/
+.DS_Store
