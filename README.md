@@ -73,27 +73,35 @@ Type `/` in the note field to see commands; **⇥** completes.
 
 ## Install
 
-Requires macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`).
+Requires macOS 14 (Sonoma) or later, on Apple Silicon or Intel.
+
+**Homebrew**
 
 ```sh
-git clone https://github.com/ishaan-os/jot.git && cd jot
-./build.sh                  # builds and installs ~/Applications/Jot.app
-open ~/Applications/Jot.app
+brew install --cask ishaan-os/tap/jot
 ```
 
-Then allow Jot in **System Settings → Privacy & Security → Accessibility** — the widget shows a
-banner until you do. Jot needs it to read your selection and to type the paste for you.
+**Or download** [Jot-0.1.0.dmg](https://github.com/ishaan-os/jot/releases/latest) from the latest
+release, open it, and drag Jot to Applications. It's signed and notarized by Apple, so it opens
+without warnings.
 
+Then open Jot and allow it in **System Settings → Privacy & Security → Accessibility** — the widget
+shows a banner until you do. Jot needs it to read your selection and to type the paste for you.
 Right-click the menu-bar icon → **Launch at Login** to keep it around.
 
 ## Update
 
-```sh
-cd jot && git pull && ./build.sh && open ~/Applications/Jot.app
-```
+Right-click the menu-bar icon → **Check for Updates…**, or `brew upgrade --cask jot`. Your notes and
+the Accessibility permission carry over. See [CHANGELOG.md](CHANGELOG.md) for what's new.
 
-Your notes and the Accessibility permission carry over. See [CHANGELOG.md](CHANGELOG.md) for
-what's new; your version is under right-click on the menu-bar icon → **About Jot**.
+## Build from source
+
+Needs the Xcode Command Line Tools (`xcode-select --install`).
+
+```sh
+git clone https://github.com/ishaan-os/jot.git && cd jot
+./build.sh && open ~/Applications/Jot.app     # rebuild the same way after git pull
+```
 
 ## Privacy
 
@@ -115,10 +123,10 @@ never *which*, and records nothing), and typing ⌘V when you paste.
 
 ## Uninstall
 
-Quit Jot from its menu, then:
+Quit Jot from its menu. With Homebrew: `brew uninstall --zap --cask jot`. Otherwise:
 
 ```sh
-rm -rf ~/Applications/Jot.app ~/Library/Application\ Support/Jot ~/Library/Logs/Jot.log
+rm -rf /Applications/Jot.app ~/Applications/Jot.app ~/Library/Application\ Support/Jot ~/Library/Logs/Jot.log
 defaults delete io.github.ishaan-os.jot
 ```
 
