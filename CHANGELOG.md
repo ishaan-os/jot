@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.2
+
+- Section tabs keep their size: the delete **×** now appears over the tab's trailing edge on hover
+  (the name fades underneath) instead of reserving space on every tab.
+
 ## 0.1.1
 
 - Section tabs highlight on hover, and hovering a named section shows an **×** to delete it (undoable).

@@ -667,22 +667,32 @@ struct WidgetView: View {
         let on = store.active == id
         let n = store.count(in: id)
         let key = id?.uuidString ?? "inbox"
-        let hovered = hoveredTab == key
+        // Named sections show a delete × on hover. Like browser tabs, it overlays the trailing edge
+        // (the label fades out underneath) so tabs keep their size and nothing shifts.
+        let showX = id != nil && hoveredTab == key
         return HStack(spacing: 4) {
             Text(name).lineLimit(1)
             if n > 0 { Text("\(n)").foregroundStyle(.secondary) }
-            if let id {
-                // Always laid out (invisible until hover) so tabs don't shift when it appears.
-                Button { store.deleteSection(id) } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .opacity(hovered ? 1 : 0).disabled(!hovered)
-                    .help("Delete section and its notes (undoable)")
+        }
+        .mask(HStack(spacing: 0) {
+            Rectangle()
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: showX ? 16 : 0)
+        })
+        .overlay(alignment: .trailing) {
+            if let id, showX {
+                Button { store.deleteSection(id) } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                        .frame(width: 14, height: 14).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Delete section and its notes (undoable)")
             }
         }
         .font(.caption.weight(on ? .semibold : .regular))
         .padding(.horizontal, 8).padding(.vertical, 3)
         .background(Capsule().fill(on ? Color.accentColor.opacity(0.18)
-                                      : hovered ? Color.primary.opacity(0.07) : .clear))
+                                      : hoveredTab == key ? Color.primary.opacity(0.07) : .clear))
         .contentShape(Capsule())
         .onTapGesture { store.switchTo(id) }
         .onHover { inside in
