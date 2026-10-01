@@ -614,6 +614,8 @@ struct WidgetView: View {
     @AppStorage("clearAfter") private var clearAfter = true
     @FocusState private var composerFocused: Bool
     @State private var status: String?
+    /// Tab under the pointer ("inbox" for the Inbox tab).
+    @State private var hoveredTab: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -664,15 +666,28 @@ struct WidgetView: View {
     private func tab(_ id: UUID?, _ name: String) -> some View {
         let on = store.active == id
         let n = store.count(in: id)
+        let key = id?.uuidString ?? "inbox"
+        let hovered = hoveredTab == key
         return HStack(spacing: 4) {
             Text(name).lineLimit(1)
             if n > 0 { Text("\(n)").foregroundStyle(.secondary) }
+            if let id {
+                // Always laid out (invisible until hover) so tabs don't shift when it appears.
+                Button { store.deleteSection(id) } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .opacity(hovered ? 1 : 0).disabled(!hovered)
+                    .help("Delete section and its notes (undoable)")
+            }
         }
         .font(.caption.weight(on ? .semibold : .regular))
         .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(Capsule().fill(on ? Color.accentColor.opacity(0.18) : .clear))
+        .background(Capsule().fill(on ? Color.accentColor.opacity(0.18)
+                                      : hovered ? Color.primary.opacity(0.07) : .clear))
         .contentShape(Capsule())
         .onTapGesture { store.switchTo(id) }
+        .onHover { inside in
+            if inside { hoveredTab = key } else if hoveredTab == key { hoveredTab = nil }
+        }
         .help(on ? "Writing here" : "Switch here (⇧⇥ cycles)")
     }
 

@@ -21,4 +21,6 @@ hdiutil create -volname "Jot $VERSION" -srcfolder build/dmg -ov -format UDZO $DM
 codesign --force --timestamp --sign "$SIGN_IDENTITY" $DMG
 xcrun notarytool submit $DMG $NOTARY
 xcrun stapler staple $DMG
+# Stable name too, so the README can link releases/latest/download/Jot.dmg.
+cp $DMG dist/Jot.dmg
 shasum -a 256 $DMG

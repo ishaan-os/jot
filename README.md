@@ -3,6 +3,13 @@
 <p align="center"><b>A scratchpad for reviewing AI output — in your agent, your docs and your PRs.</b><br>
 Three gestures. No setup, no account, no sync.</p>
 
+<p align="center">
+  <a href="https://github.com/ishaan-os/jot/releases/latest/download/Jot.dmg"><img src="https://img.shields.io/badge/Download_for_Mac-Jot.dmg-FF7B3A?style=for-the-badge&logo=apple&logoColor=white" height="44" alt="Download Jot for Mac"></a><br>
+  <sub>macOS 14+ · Apple Silicon &amp; Intel · signed &amp; notarized by Apple · or <code>brew install --cask ishaan-os/tap/jot</code></sub>
+</p>
+
+<p align="center"><img src="assets/hero-flow.png" alt="Grab it anywhere, keep it in one list, paste it back: notes captured from a terminal agent, a design doc and a PR diff flow into Jot and are pasted into the agent"></p>
+
 <p align="center"><img src="assets/demo.gif" alt="Jot demo: start a section with /new, capture from a terminal agent, a design doc and a pull-request diff with ⇧⇧, jot a thought with ⌘⌘, paste it all back into the agent with ⌃⌃"></p>
 
 You're reading an agent's plan in the terminal, a design doc, a PR diff — and you keep having
@@ -69,21 +76,15 @@ Type `/` in the note field to see commands; **⇥** completes.
 | `/rename name` · `/delete` | rename or delete this section (delete is undoable) |
 | `/clear` · `/copy` · `/paste` | act on this section's notes |
 
-<p align="center"><img src="assets/hero.png" width="800" alt="Jot collecting notes into a named section from a pull-request diff"></p>
+<p align="center"><img src="assets/hero-poster.png" width="800" alt="Jot's widget with a named section holding notes from Terminal, Docs and Browser, next to its three gestures"></p>
 
 ## Install
 
-Requires macOS 14 (Sonoma) or later, on Apple Silicon or Intel.
+**[⬇ Download Jot.dmg](https://github.com/ishaan-os/jot/releases/latest/download/Jot.dmg)**, open it,
+and drag Jot to Applications. It's signed and notarized by Apple, so it opens without warnings.
+Needs macOS 14 (Sonoma) or later, on Apple Silicon or Intel.
 
-**Homebrew**
-
-```sh
-brew install --cask ishaan-os/tap/jot
-```
-
-**Or download** [Jot-0.1.0.dmg](https://github.com/ishaan-os/jot/releases/latest) from the latest
-release, open it, and drag Jot to Applications. It's signed and notarized by Apple, so it opens
-without warnings.
+Prefer Homebrew? `brew install --cask ishaan-os/tap/jot`
 
 Then open Jot and allow it in **System Settings → Privacy & Security → Accessibility** — the widget
 shows a banner until you do. Jot needs it to read your selection and to type the paste for you.
@@ -150,7 +151,8 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Media
 
 Everything under `assets/` is rendered from a scripted SwiftUI mock (`promo/Promo.swift`) — no screen
-recording. `promo/render.sh` regenerates `hero.png`, `widget.png`, `demo.gif` and `demo.mp4`
+recording. `promo/render.sh` regenerates `widget.png`, `demo.gif` and `demo.mp4`; `promo/render.sh heroes`
+regenerates `hero-flow.png`, `hero-poster.png` and `hero-dark.png` (the social preview)
 (or `promo/bin/promo assets frames <dir>` dumps a 30fps PNG sequence for ffmpeg).
 The icon is `promo/icon.svg`; `promo/make-icns.swift` turns it into `AppIcon.icns`.
 

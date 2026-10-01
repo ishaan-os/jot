@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.1
+
+- Section tabs highlight on hover, and hovering a named section shows an **×** to delete it (undoable).
+
 ## 0.1.0
 
 First public release.

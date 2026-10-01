@@ -637,13 +637,18 @@ func heroState() -> SceneState {
 
 struct GestureCaps: View {
     let key: String
+    /// Key name printed under the glyph, like a real Mac keycap (⌃ alone reads as "^").
+    let name: String
     let label: String
     var dark = false
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 6) {
                 ForEach(0..<2, id: \.self) { _ in
-                    Text(key).font(.system(size: 26, weight: .semibold))
+                    VStack(spacing: 1) {
+                        Text(key).font(.system(size: 22, weight: .semibold))
+                        Text(name).font(.system(size: 8.5, weight: .medium)).opacity(0.6)
+                    }
                         .foregroundStyle(dark ? .white : ink)
                         .frame(width: 50, height: 50)
                         .background(RoundedRectangle(cornerRadius: 11)
@@ -663,9 +668,9 @@ struct GestureRow: View {
     var dark = false
     var body: some View {
         HStack(spacing: 30) {
-            GestureCaps(key: "⇧", label: "capture", dark: dark)
-            GestureCaps(key: "⌘", label: "note", dark: dark)
-            GestureCaps(key: "⌃", label: "paste", dark: dark)
+            GestureCaps(key: "⇧", name: "shift", label: "capture", dark: dark)
+            GestureCaps(key: "⌘", name: "command", label: "note", dark: dark)
+            GestureCaps(key: "⌃", name: "control", label: "paste", dark: dark)
         }
     }
 }
@@ -804,6 +809,7 @@ struct HeroFlow: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Wallpaper()
+            ZStack(alignment: .topLeading) {
             Text("Grab it anywhere.  Keep it in one list.  Paste it back.")
                 .font(.system(size: 30, weight: .heavy)).foregroundStyle(ink)
                 .frame(width: HW).offset(y: 34)
@@ -822,15 +828,15 @@ struct HeroFlow: View {
             ForEach(0..<3, id: \.self) { i in
                 Circle().fill(orange).frame(width: 11, height: 11).offset(x: 374, y: minis[i] - 5.5)
             }
-            WidgetMock(s: heroState()).frame(width: 340, height: 430).offset(x: 470, y: widgetTop)
+            WidgetMock(s: heroState()).frame(width: 340, height: 388).offset(x: 470, y: widgetTop)
             // Jot → agent prompt
-            Path { p in p.move(to: CGPoint(x: 816, y: 330)); p.addLine(to: CGPoint(x: 884, y: 330)) }
+            Path { p in p.move(to: CGPoint(x: 816, y: 309)); p.addLine(to: CGPoint(x: 884, y: 309)) }
                 .stroke(orange, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-            ArrowHead().fill(orange).frame(width: 16, height: 18).offset(x: 882, y: 321)
-            Text("⌃⌃").font(.system(size: 16, weight: .bold)).foregroundStyle(ink)
+            ArrowHead().fill(orange).frame(width: 16, height: 18).offset(x: 882, y: 300)
+            Text("⌃⌃ paste").font(.system(size: 12, weight: .bold)).foregroundStyle(ink)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(.white.opacity(0.85)))
-                .offset(x: 826, y: 289)
+                .offset(x: 817, y: 272)
             MiniWindow(label: "agent — ~/api", dark: true) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top, spacing: 6) {
@@ -841,7 +847,9 @@ struct HeroFlow: View {
                 }
                 .font(.system(size: 11.5, design: .monospaced)).lineSpacing(2).padding(12)
             }
-            .frame(width: 350, height: 270).offset(x: 902, y: 195)
+            .frame(width: 350, height: 218).offset(x: 902, y: 200)
+            }
+            .offset(y: 40)
         }
         .frame(width: HW, height: HH)
         .clipped()
@@ -1040,7 +1048,6 @@ MainActor.assumeIsolated {
     let only = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "all"
 
     if only == "all" || only == "stills" {
-        writePNG(image(Scene(s: state(at: 13.3), icon: icon), scale: 2), out.appendingPathComponent("hero.png"))
         writePNG(image(WidgetMock(s: state(at: 17.0)).frame(width: 360, height: 560).padding(40)
             .background(Wallpaper()), scale: 2), out.appendingPathComponent("widget.png"))
         for t in [1.6, 4.6, 8.6, 13.3, 15.9, 18.3, 22] {
@@ -1060,7 +1067,7 @@ MainActor.assumeIsolated {
     }
     // Hero concepts at GitHub's 2:1 social-preview size.
     if only == "heroes" {
-        let dir = URL(fileURLWithPath: CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "promo/heroes")
+        let dir = URL(fileURLWithPath: CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : out.path)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         writePNG(image(HeroPoster(icon: icon), scale: 2), dir.appendingPathComponent("hero-poster.png"))
         writePNG(image(HeroFlow(), scale: 2), dir.appendingPathComponent("hero-flow.png"))
