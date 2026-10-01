@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.3
+
+- Hovering a section tab now grows it slightly to reveal a small round **×** (replacing 0.1.2's
+  overlay, which could sit on top of the name).
+
 ## 0.1.2
 
 - Section tabs keep their size: the delete **×** now appears over the tab's trailing edge on hover

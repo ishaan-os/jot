@@ -604,6 +604,46 @@ struct RowView: View {
     }()
 }
 
+/// A section pill. Hovering a deletable tab grows it just enough to reveal a small round ×
+/// (token-field style), so the × never sits on top of the name.
+struct SectionTab: View {
+    let name: String
+    let count: Int
+    let selected: Bool
+    let hovered: Bool
+    let onSelect: () -> Void
+    /// nil for Inbox, which can't be deleted.
+    let onDelete: (() -> Void)?
+    @State private var xHovered = false
+
+    var body: some View {
+        let showX = hovered && onDelete != nil
+        HStack(spacing: 4) {
+            Text(name).lineLimit(1)
+            if count > 0 { Text("\(count)").foregroundStyle(.secondary) }
+            if showX, let onDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                        .frame(width: 14, height: 14)
+                        .background(Circle().fill(Color.primary.opacity(xHovered ? 0.2 : 0.1)))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .onHover { xHovered = $0 }
+                .help("Delete section and its notes (undoable)")
+                .transition(.opacity)
+            }
+        }
+        .font(.caption.weight(selected ? .semibold : .regular))
+        .padding(.leading, 8).padding(.trailing, showX ? 3 : 8).padding(.vertical, 3)
+        .background(Capsule().fill(selected ? Color.accentColor.opacity(0.18)
+                                            : hovered ? Color.primary.opacity(0.07) : .clear))
+        .contentShape(Capsule())
+        .onTapGesture(perform: onSelect)
+        .animation(.easeOut(duration: 0.12), value: showX)
+        .help(selected ? "Writing here" : "Switch here (⇧⇥ cycles)")
+    }
+}
+
 struct WidgetView: View {
     @ObservedObject var store: Store
     let done: () -> Void
@@ -664,41 +704,14 @@ struct WidgetView: View {
     }
 
     private func tab(_ id: UUID?, _ name: String) -> some View {
-        let on = store.active == id
-        let n = store.count(in: id)
         let key = id?.uuidString ?? "inbox"
-        // Named sections show a delete × on hover. Like browser tabs, it overlays the trailing edge
-        // (the label fades out underneath) so tabs keep their size and nothing shifts.
-        let showX = id != nil && hoveredTab == key
-        return HStack(spacing: 4) {
-            Text(name).lineLimit(1)
-            if n > 0 { Text("\(n)").foregroundStyle(.secondary) }
-        }
-        .mask(HStack(spacing: 0) {
-            Rectangle()
-            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: showX ? 16 : 0)
-        })
-        .overlay(alignment: .trailing) {
-            if let id, showX {
-                Button { store.deleteSection(id) } label: {
-                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                        .frame(width: 14, height: 14).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
-                .help("Delete section and its notes (undoable)")
+        return SectionTab(name: name, count: store.count(in: id), selected: store.active == id,
+                          hovered: hoveredTab == key,
+                          onSelect: { store.switchTo(id) },
+                          onDelete: id.map { id in { store.deleteSection(id) } })
+            .onHover { inside in
+                if inside { hoveredTab = key } else if hoveredTab == key { hoveredTab = nil }
             }
-        }
-        .font(.caption.weight(on ? .semibold : .regular))
-        .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(Capsule().fill(on ? Color.accentColor.opacity(0.18)
-                                      : hoveredTab == key ? Color.primary.opacity(0.07) : .clear))
-        .contentShape(Capsule())
-        .onTapGesture { store.switchTo(id) }
-        .onHover { inside in
-            if inside { hoveredTab = key } else if hoveredTab == key { hoveredTab = nil }
-        }
-        .help(on ? "Writing here" : "Switch here (⇧⇥ cycles)")
     }
 
     private func startCommand(_ text: String) {
