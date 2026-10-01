@@ -12,4 +12,5 @@ First public release.
   active section until you switch (**⇧⇥**); paste, copy and clear only touch that section.
 - Slash commands with **⇥** completion; dictation (e.g. Wispr Flow) works in the note field.
 - **⌃⇧J** shows Jot ready to type, or hides it; the widget opens on the display you're working on.
-- Accessibility permission survives updates.
+- Signed and notarized universal (Apple Silicon + Intel) download; Accessibility permission survives updates.
+- **Check for Updates…** in the menu-bar menu.

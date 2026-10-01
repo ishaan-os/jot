@@ -97,7 +97,7 @@ what's new; your version is under right-click on the menu-bar icon → **About J
 
 ## Privacy
 
-Jot never touches the network. Notes stay in a local file on your Mac. The Accessibility
+Jot only goes online when you click **Check for Updates…** (one request to GitHub's releases API). Notes stay in a local file on your Mac. The Accessibility
 permission is used for three things: reading the text you select when you press ⇧⇧, watching
 modifier keys to spot double taps (it only checks *whether* another key was pressed in between,
 never *which*, and records nothing), and typing ⌘V when you paste.
@@ -133,8 +133,9 @@ and remove Jot from the Accessibility list.
 - The widget floats without taking focus until you type in it, and hands focus back to your app
   before pasting — so ⌘V lands at your cursor.
 - Notes and sections: `~/Library/Application Support/Jot/state.json` · debug log: `~/Library/Logs/Jot.log`.
-- Builds are ad-hoc signed with a designated requirement pinned to the bundle id, so macOS keeps the
-  Accessibility grant across rebuilds instead of treating every build as a new app.
+- Releases are signed with a Developer ID and notarized by Apple (`release.sh`, run by the tag-triggered
+  release workflow). Source builds are ad-hoc signed with a designated requirement pinned to the bundle
+  id, so macOS keeps the Accessibility grant across rebuilds instead of treating each as a new app.
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 

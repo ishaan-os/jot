@@ -617,6 +617,354 @@ struct Scene: View {
     }
 }
 
+// MARK: - Heroes (1280×640, GitHub's social-preview ratio)
+
+let HW: CGFloat = 1280, HH: CGFloat = 640
+let orange = Color(red: 1.0, green: 0.54, blue: 0.24)
+
+/// A finished review: one named section holding notes captured from three different tools.
+func heroState() -> SceneState {
+    var s = SceneState()
+    s.section = sectionName
+    s.items = [
+        DemoItem(quote: termSel, note: termNote, app: "Terminal", age: "6m"),
+        DemoItem(quote: docSel, note: docNote, app: "Docs", age: "3m"),
+        DemoItem(quote: prSel, note: prNote, app: "Browser", age: "now"),
+        DemoItem(quote: nil, note: thought, app: nil, age: "now"),
+    ]
+    return s
+}
+
+struct GestureCaps: View {
+    let key: String
+    let label: String
+    var dark = false
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                ForEach(0..<2, id: \.self) { _ in
+                    Text(key).font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(dark ? .white : ink)
+                        .frame(width: 50, height: 50)
+                        .background(RoundedRectangle(cornerRadius: 11)
+                            .fill(dark ? Color(white: 0.16) : .white)
+                            .shadow(color: .black.opacity(dark ? 0.5 : 0.18), radius: 0, y: 3))
+                        .overlay(RoundedRectangle(cornerRadius: 11)
+                            .stroke(dark ? orange.opacity(0.55) : Color.black.opacity(0.08), lineWidth: 1.5))
+                }
+            }
+            Text(label).font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(dark ? Color(white: 0.85) : ink.opacity(0.85))
+        }
+    }
+}
+
+struct GestureRow: View {
+    var dark = false
+    var body: some View {
+        HStack(spacing: 30) {
+            GestureCaps(key: "⇧", label: "capture", dark: dark)
+            GestureCaps(key: "⌘", label: "note", dark: dark)
+            GestureCaps(key: "⌃", label: "paste", dark: dark)
+        }
+    }
+}
+
+// A: warm poster — headline + gestures left, a full widget right.
+struct HeroPoster: View {
+    let icon: NSImage
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Wallpaper()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(nsImage: icon).resizable().frame(width: 56, height: 56)
+                    Text("Jot").font(.system(size: 30, weight: .bold)).foregroundStyle(ink)
+                }
+                Spacer().frame(height: 34)
+                Text("Review AI output\nwithout losing\na thought.")
+                    .font(.system(size: 56, weight: .heavy)).foregroundStyle(ink).lineSpacing(-4)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer().frame(height: 18)
+                Text("Capture from any app. Annotate. Paste it all back.")
+                    .font(.system(size: 20, weight: .medium)).foregroundStyle(ink.opacity(0.7))
+                Spacer().frame(height: 40)
+                GestureRow()
+            }
+            .offset(x: 72, y: 64)
+            WidgetMock(s: heroState()).frame(width: 400, height: 440).offset(x: 810, y: 100)
+        }
+        .frame(width: HW, height: HH)
+        .clipped()
+        .environment(\.colorScheme, .light)
+    }
+}
+
+// B: flow — three tools feed one list, which pastes into the agent.
+struct MiniWindow<Content: View>: View {
+    var label: String
+    var dark = false
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                ForEach([Color(red: 1, green: 0.37, blue: 0.34), Color(red: 1, green: 0.74, blue: 0.18),
+                         Color(red: 0.16, green: 0.79, blue: 0.25)], id: \.self) { Circle().fill($0).frame(width: 8, height: 8) }
+                Spacer()
+                Text(label).font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(dark ? Color(white: 0.6) : .secondary)
+                Spacer()
+                Color.clear.frame(width: 34)
+            }
+            .padding(.horizontal, 10).frame(height: 24)
+            .background(dark ? Color(white: 0.16) : Color(white: 0.955))
+            content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .background(dark ? Color(red: 0.09, green: 0.10, blue: 0.12) : .white)
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .shadow(color: .black.opacity(0.22), radius: 16, y: 8)
+    }
+}
+
+func fullHighlight(_ text: String, _ sel: String, color: Color = selectionBlue) -> AttributedString {
+    highlighted(text, (sel, 1), color: color)
+}
+
+struct MiniTerminal: View {
+    var body: some View {
+        MiniWindow(label: "agent — ~/api", dark: true) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("● I'll add a token-bucket limiter.").foregroundStyle(Color(white: 0.85))
+                Text(fullHighlight("● 100 req/min, stored in process memory.", termSel,
+                                   color: Color(red: 0.22, green: 0.38, blue: 0.62)))
+                    .foregroundStyle(Color(white: 0.85))
+                Text("✓ 14 tests passed").foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.55))
+            }
+            .font(.system(size: 12, design: .monospaced)).padding(12)
+        }
+    }
+}
+
+struct MiniDoc: View {
+    var body: some View {
+        MiniWindow(label: "Rate limiting — design") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Behavior").font(.system(size: 14, weight: .bold)).foregroundStyle(ink)
+                Text(fullHighlight("Each key gets 100 requests per minute. " + docSel, docSel))
+                    .font(.system(size: 12)).foregroundStyle(ink.opacity(0.9)).lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+        }
+    }
+}
+
+struct MiniPR: View {
+    let rows: [(Character, String)] = [
+        ("-", "    return handler(request)"),
+        ("+", "    if not bucket.take():"),
+        ("+", "        " + prSel),
+    ]
+    var body: some View {
+        MiniWindow(label: "Pull request #412") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                    HStack(spacing: 6) {
+                        Text(String(r.0)).foregroundStyle(r.0 == "+" ? Color(red: 0.13, green: 0.6, blue: 0.3)
+                                                                     : Color(red: 0.8, green: 0.2, blue: 0.25))
+                        Text(fullHighlight(r.1, prSel)).foregroundStyle(ink)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(r.0 == "+" ? Color(red: 0.90, green: 0.98, blue: 0.91) : Color(red: 1.0, green: 0.92, blue: 0.93))
+                }
+            }
+            .font(.system(size: 12, design: .monospaced)).padding(.top, 8)
+        }
+    }
+}
+
+struct ArrowHead: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.midY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+struct HeroFlow: View {
+    // Mini windows: x 40…380; widget 470…810; prompt 900…1240.
+    let minis: [CGFloat] = [150, 310, 470]   // vertical centers
+    let widgetTop: CGFloat = 115
+    let rowCenters: [CGFloat] = [206, 275, 344]
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Wallpaper()
+            Text("Grab it anywhere.  Keep it in one list.  Paste it back.")
+                .font(.system(size: 30, weight: .heavy)).foregroundStyle(ink)
+                .frame(width: HW).offset(y: 34)
+            // Connectors (drawn under the windows).
+            ForEach(0..<3, id: \.self) { i in
+                Path { p in
+                    let a = CGPoint(x: 380, y: minis[i]), b = CGPoint(x: 470, y: rowCenters[i])
+                    p.move(to: a)
+                    p.addCurve(to: b, control1: CGPoint(x: 430, y: a.y), control2: CGPoint(x: 420, y: b.y))
+                }
+                .stroke(orange, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [2, 7]))
+            }
+            MiniTerminal().frame(width: 340, height: 118).offset(x: 40, y: minis[0] - 59)
+            MiniDoc().frame(width: 340, height: 118).offset(x: 40, y: minis[1] - 59)
+            MiniPR().frame(width: 340, height: 118).offset(x: 40, y: minis[2] - 59)
+            ForEach(0..<3, id: \.self) { i in
+                Circle().fill(orange).frame(width: 11, height: 11).offset(x: 374, y: minis[i] - 5.5)
+            }
+            WidgetMock(s: heroState()).frame(width: 340, height: 430).offset(x: 470, y: widgetTop)
+            // Jot → agent prompt
+            Path { p in p.move(to: CGPoint(x: 816, y: 330)); p.addLine(to: CGPoint(x: 884, y: 330)) }
+                .stroke(orange, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+            ArrowHead().fill(orange).frame(width: 16, height: 18).offset(x: 882, y: 321)
+            Text("⌃⌃").font(.system(size: 16, weight: .bold)).foregroundStyle(ink)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(.white.opacity(0.85)))
+                .offset(x: 826, y: 289)
+            MiniWindow(label: "agent — ~/api", dark: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(">").foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.55))
+                        Text(render(heroState().items)).foregroundStyle(Color(white: 0.88))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(.system(size: 11.5, design: .monospaced)).lineSpacing(2).padding(12)
+            }
+            .frame(width: 350, height: 270).offset(x: 902, y: 195)
+        }
+        .frame(width: HW, height: HH)
+        .clipped()
+        .environment(\.colorScheme, .light)
+    }
+}
+
+// C: dark — for developers.
+struct DarkWidget: View {
+    let s: SceneState
+    let bg = Color(red: 0.12, green: 0.13, blue: 0.16)
+    let line = Color.white.opacity(0.08)
+    let text = Color(white: 0.92), dim = Color(white: 0.55)
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Jot · \(s.section ?? "")").font(.system(size: 11, weight: .semibold)).foregroundStyle(dim)
+                .frame(maxWidth: .infinity).frame(height: 26).background(Color(red: 0.16, green: 0.17, blue: 0.20))
+            HStack(spacing: 4) {
+                Text("Inbox").padding(.horizontal, 8).padding(.vertical, 3).foregroundStyle(dim)
+                Text("\(s.section ?? "")  \(s.items.count)").fontWeight(.semibold).foregroundStyle(text)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(orange.opacity(0.28)))
+                Spacer()
+            }
+            .font(.system(size: 11)).padding(.horizontal, 8).padding(.vertical, 6)
+            Rectangle().fill(line).frame(height: 1)
+            VStack(spacing: 0) {
+                ForEach(Array(s.items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "circle").font(.system(size: 12)).foregroundStyle(dim)
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let q = item.quote {
+                                HStack(spacing: 6) {
+                                    Rectangle().fill(orange.opacity(0.7)).frame(width: 2)
+                                    Text(q).font(.system(size: 12)).foregroundStyle(dim).lineLimit(2)
+                                }.fixedSize(horizontal: false, vertical: true)
+                            }
+                            Text(item.note).font(.system(size: 13)).foregroundStyle(text)
+                            Text([item.app, item.age].compactMap { $0 }.joined(separator: " · "))
+                                .font(.system(size: 10)).foregroundStyle(Color(white: 0.4))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    Rectangle().fill(line).frame(height: 1)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+            Rectangle().fill(line).frame(height: 1)
+            HStack {
+                Text("Jot in \(s.section ?? "")…   / for commands").font(.system(size: 12)).foregroundStyle(Color(white: 0.4))
+                Spacer()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            Rectangle().fill(line).frame(height: 1)
+            HStack(spacing: 6) {
+                Text("\(s.items.count) notes").font(.system(size: 11)).foregroundStyle(dim)
+                Spacer()
+                Text("Copy").font(.system(size: 11, weight: .medium)).foregroundStyle(text)
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.1)))
+                Text("Paste").font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(orange))
+            }
+            .padding(8)
+        }
+        .background(bg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.55), radius: 30, y: 16)
+    }
+}
+
+struct HeroDark: View {
+    let icon: NSImage
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            LinearGradient(colors: [Color(red: 0.05, green: 0.07, blue: 0.12), Color(red: 0.09, green: 0.09, blue: 0.14)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [orange.opacity(0.38), .clear], center: UnitPoint(x: 0.8, y: 0.62),
+                           startRadius: 0, endRadius: 520)
+            RadialGradient(colors: [Color(red: 0.3, green: 0.4, blue: 0.9).opacity(0.18), .clear],
+                           center: UnitPoint(x: 0.05, y: 0.0), startRadius: 0, endRadius: 500)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(nsImage: icon).resizable().frame(width: 56, height: 56)
+                    Text("Jot").font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
+                }
+                Spacer().frame(height: 34)
+                (Text("Your review notes,\n").foregroundColor(.white)
+                    + Text("one keystroke").foregroundColor(orange)
+                    + Text(" away.").foregroundColor(.white))
+                    .font(.system(size: 54, weight: .heavy)).lineSpacing(-4)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer().frame(height: 18)
+                Text("Capture from your agent, docs and PRs.\nPaste it all back where your cursor is.")
+                    .font(.system(size: 19, weight: .medium)).foregroundStyle(Color(white: 0.65)).lineSpacing(3)
+                Spacer().frame(height: 40)
+                GestureRow(dark: true)
+            }
+            .offset(x: 72, y: 64)
+            MiniWindow(label: "agent — ~/api", dark: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("> add rate limiting to the API").foregroundStyle(Color(white: 0.55))
+                    Text("● Added a token-bucket limiter.").foregroundStyle(Color(white: 0.88))
+                    Text("● 100 req/min per API key,").foregroundStyle(Color(white: 0.88))
+                    Text(fullHighlight("  stored in process memory.", termSel, color: orange.opacity(0.45)))
+                        .foregroundStyle(.white)
+                    Text("✓ 14 tests passed").foregroundStyle(Color(red: 0.45, green: 0.85, blue: 0.55))
+                }
+                .font(.system(size: 13, design: .monospaced)).padding(16)
+            }
+            .frame(width: 520, height: 270).offset(x: 600, y: 60)
+            DarkWidget(s: heroState()).frame(width: 340, height: 410).offset(x: 900, y: 195)
+        }
+        .frame(width: HW, height: HH)
+        .clipped()
+        .environment(\.colorScheme, .dark)
+    }
+}
+
 // MARK: - Output
 
 /// ImageRenderer draws blank without a window server session, so render through an
@@ -709,6 +1057,14 @@ MainActor.assumeIsolated {
             writePNG(image(Scene(s: state(at: Double(i) / 30), icon: icon), scale: 1.5),
                      dir.appendingPathComponent(String(format: "%04d.png", i)))
         }
+    }
+    // Hero concepts at GitHub's 2:1 social-preview size.
+    if only == "heroes" {
+        let dir = URL(fileURLWithPath: CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "promo/heroes")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        writePNG(image(HeroPoster(icon: icon), scale: 2), dir.appendingPathComponent("hero-poster.png"))
+        writePNG(image(HeroFlow(), scale: 2), dir.appendingPathComponent("hero-flow.png"))
+        writePNG(image(HeroDark(icon: icon), scale: 2), dir.appendingPathComponent("hero-dark.png"))
     }
     if only == "all" || only == "mp4" { do { try writeMP4(out.appendingPathComponent("demo.mp4"), icon: icon, fps: 30, scale: 1.5) } catch { print("mp4 failed:", error) } }
 }

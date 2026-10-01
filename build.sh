@@ -1,5 +1,7 @@
 #!/bin/zsh
 # Builds Jot.app and installs it to ~/Applications (--no-install: just build into build/).
+#   UNIVERSAL=1      build for Apple Silicon + Intel (releases)
+#   SIGN_IDENTITY=…  sign with a Developer ID (hardened runtime) instead of ad-hoc
 set -e
 cd "$(dirname "$0")"
 APP=build/Jot.app
@@ -15,7 +17,12 @@ if [[ -f $STALE && -f ${STALE:h}/bridging.modulemap ]]; then
   echo "{ \"version\": 0, \"roots\": [ { \"name\": \"$STALE\", \"type\": \"file\", \"external-contents\": \"$PWD/.toolchain-fix/empty.modulemap\" } ] }" > .toolchain-fix/overlay.yaml
   FLAGS=(-vfsoverlay .toolchain-fix/overlay.yaml -module-cache-path $PWD/.toolchain-fix/module-cache)
 fi
-swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14" $FLAGS main.swift -o $APP/Contents/MacOS/Jot
+ARCHS=($(uname -m))
+[[ -n "$UNIVERSAL" ]] && ARCHS=(arm64 x86_64)
+for arch in $ARCHS; do
+  swiftc -O -swift-version 5 -target "$arch-apple-macos14" $FLAGS main.swift -o build/Jot-$arch
+done
+lipo -create build/Jot-* -output $APP/Contents/MacOS/Jot && rm build/Jot-*
 cp assets/AppIcon.icns $APP/Contents/Resources/
 cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -32,9 +39,13 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
-# Pin the designated requirement to the bundle id (ad-hoc signatures otherwise default to
-# the per-build cdhash, which makes macOS forget the Accessibility grant on every rebuild).
-codesign --force --sign - --requirements "=designated => identifier \"$BUNDLE_ID\"" $APP
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" $APP
+else
+  # Source builds: pin the designated requirement to the bundle id (ad-hoc signatures otherwise
+  # default to the per-build cdhash, which makes macOS forget the Accessibility grant on every rebuild).
+  codesign --force --sign - --requirements "=designated => identifier \"$BUNDLE_ID\"" $APP
+fi
 [[ "$1" == "--no-install" ]] && { echo "Built $APP ($VERSION)"; exit 0; }
 pkill -x Jot || true
 rm -rf ~/Applications/Jot.app && cp -R $APP ~/Applications/

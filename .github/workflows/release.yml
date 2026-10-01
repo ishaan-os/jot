@@ -1,0 +1,44 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches VERSION
+        run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KC=$RUNNER_TEMP/build.keychain-db
+          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/cert.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KC
+          security set-keychain-settings -lut 3600 $KC
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KC
+          security import $RUNNER_TEMP/cert.p12 -k $KC -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KC
+          security list-keychains -d user -s $KC $(security list-keychains -d user | tr -d '"')
+          rm $RUNNER_TEMP/cert.p12
+      - name: Build, sign, notarize
+        env:
+          SIGN_IDENTITY: "Developer ID Application: Ishaan Nagpal (U688FKRN6H)"
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          export NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8
+          echo "$NOTARY_KEY" | base64 --decode > $NOTARY_KEY_PATH
+          ./release.sh
+      - name: Release notes from CHANGELOG
+        run: awk -v v="## $(cat VERSION)" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md > $RUNNER_TEMP/notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          body_path: ${{ runner.temp }}/notes.md

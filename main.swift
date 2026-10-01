@@ -985,6 +985,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu = NSMenu()
         menu.addItem(withTitle: "About Jot \(Self.version)…", action: #selector(openProjectPage), keyEquivalent: "")
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         menu.addItem(.separator())
         let toggle = menu.addItem(withTitle: "Show / Hide Jot", action: #selector(toggleWidget), keyEquivalent: "j")
         toggle.keyEquivalentModifierMask = [.control, .shift]
@@ -1068,6 +1069,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
 
     @objc func openProjectPage() { NSWorkspace.shared.open(URL(string: "https://github.com/ishaan-os/jot")!) }
+
+    /// Only network call Jot makes, and only when asked: the latest GitHub release.
+    @objc func checkForUpdates() {
+        let url = URL(string: "https://api.github.com/repos/ishaan-os/jot/releases/latest")!
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            let release = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let latest = (release?["tag_name"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
+            let page = (release?["html_url"] as? String).flatMap(URL.init(string:))
+            DispatchQueue.main.async { self.showUpdateResult(latest: latest, page: page) }
+        }.resume()
+    }
+
+    private func showUpdateResult(latest: String?, page: URL?) {
+        let alert = NSAlert()
+        if let latest, let page, latest.compare(Self.version, options: .numeric) == .orderedDescending {
+            alert.messageText = "Jot \(latest) is available"
+            alert.informativeText = "You have \(Self.version). Installed with Homebrew? Run: brew upgrade --cask jot"
+            alert.addButton(withTitle: "Download")
+            alert.addButton(withTitle: "Later")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(page) }
+        } else {
+            alert.messageText = latest == nil ? "Couldn't check for updates" : "Jot is up to date"
+            alert.informativeText = latest == nil ? "Check your connection and try again." : "You have the latest version (\(Self.version))."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
 
     // MARK: Actions
 
