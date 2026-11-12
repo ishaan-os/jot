@@ -946,10 +946,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Only the close button, ⌃⇧J and the menu hide Jot; anything that opens it leaves it open.
     private func setWidgetVisible(_ visible: Bool) {
         if visible {
-            if !widget.isVisible && !isOnScreen { moveToActiveScreen() }
+            let wasHidden = !widget.isVisible
+            if wasHidden && !isOnScreen { moveToActiveScreen() }
+            let frame = widget.frame
             widget.orderFrontRegardless()
+            // macOS can re-place a panel on another display when it's ordered back in; put it
+            // back exactly where it was.
+            if wasHidden && widget.frame != frame { widget.setFrame(frame, display: true) }
+            log("show: \(frame) -> \(widget.frame) on \(widget.screen?.localizedName ?? "?")")
         } else {
             releaseFocus()
+            log("hide: \(widget.frame) on \(widget.screen?.localizedName ?? "?")")
             widget.orderOut(nil)
         }
     }
