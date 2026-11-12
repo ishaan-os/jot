@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.4
+
+- The widget reopens where you last left it instead of jumping to the display you're working on
+  (it still moves if its old display is gone).
+- Clicking anywhere in the widget puts the cursor in the note field, so shortcuts like **⇧⇥** work
+  right after a quick click.
+
 ## 0.1.3
 
 - Hovering a section tab now grows it slightly to reveal a small round **×** (replacing 0.1.2's

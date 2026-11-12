@@ -534,6 +534,13 @@ final class DoubleTap {
 
 final class WidgetPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+    /// Called on any click in the panel, before the click is handled.
+    var onMouseDown: (() -> Void)?
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown { onMouseDown?() }
+        super.sendEvent(event)
+    }
 
     /// Jot has no Edit menu, so ⌘V/⌘C/⌘X/⌘A/⌘Z would never reach the text field. Dictation
     /// tools like Wispr Flow insert text by posting ⌘V, so route these by hand.
@@ -916,6 +923,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             copy: { [weak self] in self?.copyItems() },
             paste: { [weak self] in self?.pasteItems() },
             focus: { [weak self] in self?.widget.makeKey() }))
+        // A click anywhere in the widget (not just the note field) puts the cursor in the
+        // composer, so ⇧⇥ / typing work straight away.
+        panel.onMouseDown = { [weak self, weak panel] in
+            guard let self, let panel else { return }
+            store.focusRequest += 1
+            panel.makeKey()
+        }
         if !panel.setFrameUsingName("JotWidget"), let screen = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: screen.maxX - 380, y: screen.maxY - 460))
         }
@@ -932,7 +946,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Only the close button, ⌃⇧J and the menu hide Jot; anything that opens it leaves it open.
     private func setWidgetVisible(_ visible: Bool) {
         if visible {
-            if !widget.isVisible { moveToActiveScreen() }
+            if !widget.isVisible && !isOnScreen { moveToActiveScreen() }
             widget.orderFrontRegardless()
         } else {
             releaseFocus()
@@ -940,7 +954,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// Shows up on the display you're working on, keeping the same distance from the top-right
+    /// Jot reopens wherever you last left it; it only jumps displays when its old spot is gone
+    /// (e.g. that monitor was unplugged).
+    private var isOnScreen: Bool {
+        NSScreen.screens.contains { $0.visibleFrame.intersects(widget.frame) }
+    }
+
+    /// Moves to the display you're working on, keeping the same distance from the top-right
     /// corner it had on its previous display.
     private func moveToActiveScreen() {
         guard let target = activeScreen(), let from = widget.screen ?? NSScreen.main, target != from else { return }
